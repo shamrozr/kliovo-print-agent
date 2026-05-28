@@ -8,6 +8,7 @@ directories:
 files:
   - dist/**/*
   - src/windows/settings/index.html
+  - src/windows/settings/renderer.js
   - assets/**/*
   - package.json
   - node_modules/**/*
