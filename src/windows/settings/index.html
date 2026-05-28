@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'unsafe-inline'">
+  <title>Kliovo Print Agent</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           font-size: 13px; background: #0f1117; color: #e2e8f0;
+           padding: 20px; min-height: 100vh; }
+    h1   { font-size: 16px; font-weight: 600; margin-bottom: 20px; color: #f8fafc; }
+    label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;
+            margin-top: 14px; text-transform: uppercase; letter-spacing: .05em; }
+    input { width: 100%; padding: 8px 10px; border-radius: 6px;
+            border: 1px solid #334155; background: #1e293b;
+            color: #f1f5f9; font-size: 13px; }
+    input:focus { outline: none; border-color: #3b82f6; }
+    .section { font-size: 12px; font-weight: 600; color: #94a3b8;
+               margin: 20px 0 10px; text-transform: uppercase; letter-spacing: .05em; }
+    .card    { background: #1e293b; border-radius: 8px; padding: 14px;
+               margin-bottom: 10px; border: 1px solid #334155; }
+    .row     { display: flex; gap: 8px; margin-top: 8px; }
+    .row input { flex: 1; }
+    .actions { display: flex; gap: 8px; margin-top: 10px; }
+    button   { padding: 7px 14px; border-radius: 6px; border: none;
+               font-size: 12px; font-weight: 600; cursor: pointer; }
+    .primary { background: #3b82f6; color: #fff; }
+    .primary:hover { background: #2563eb; }
+    .danger  { background: #ef4444; color: #fff; }
+    .danger:hover  { background: #dc2626; }
+    .ghost   { background: #334155; color: #cbd5e1; }
+    .ghost:hover   { background: #475569; }
+    .footer  { display: flex; gap: 10px; margin-top: 24px;
+               justify-content: flex-end; align-items: center; }
+    .status  { font-size: 11px; color: #64748b; min-height: 16px; }
+    .ok      { color: #22c55e; }
+    .err     { color: #ef4444; }
+  </style>
+</head>
+<body>
+  <h1>Kliovo Print Agent</h1>
+
+  <label for="serverUrl">Server URL</label>
+  <input type="text" id="serverUrl" placeholder="https://dine.kliovo.com">
+
+  <div class="section">Printers</div>
+  <div id="printers"></div>
+  <button class="ghost" id="addBtn">+ Add Printer</button>
+
+  <div class="footer">
+    <span class="status" id="globalStatus"></span>
+    <button class="primary" id="saveBtn">Save</button>
+  </div>
+
+  <script>
+    // Config state
+    let cfg = { serverUrl: "", printers: [] };
+
+    // Safe text helper — sets element text content, never HTML
+    function setText(el, val) { el.textContent = String(val ?? ""); }
+    function setVal(el, val)  { el.value = String(val ?? ""); }
+
+    function buildPrinterCard(printer, index) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.dataset.index = String(index);
+
+      // Name row
+      const nameLabel = document.createElement("label");
+      setText(nameLabel, "Name");
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.placeholder = "e.g. Main Floor";
+      setVal(nameInput, printer.name);
+      nameInput.dataset.field = "name";
+
+      // IP + Port row
+      const row = document.createElement("div");
+      row.className = "row";
+
+      const ipWrap = document.createElement("div");
+      ipWrap.style.flex = "2";
+      const ipLabel = document.createElement("label");
+      setText(ipLabel, "IP Address");
+      const ipInput = document.createElement("input");
+      ipInput.type = "text";
+      ipInput.placeholder = "192.168.1.50";
+      setVal(ipInput, printer.host);
+      ipInput.dataset.field = "host";
+      ipWrap.append(ipLabel, ipInput);
+
+      const portWrap = document.createElement("div");
+      portWrap.style.flex = "1";
+      const portLabel = document.createElement("label");
+      setText(portLabel, "Port");
+      const portInput = document.createElement("input");
+      portInput.type = "number";
+      setVal(portInput, printer.port || 9100);
+      portInput.dataset.field = "port";
+      portWrap.append(portLabel, portInput);
+
+      row.append(ipWrap, portWrap);
+
+      // Printer ID
+      const pidLabel = document.createElement("label");
+      setText(pidLabel, "Printer ID");
+      const pidInput = document.createElement("input");
+      pidInput.type = "text";
+      pidInput.placeholder = "From Dine Settings > Printers";
+      setVal(pidInput, printer.printerId);
+      pidInput.dataset.field = "printerId";
+
+      // Agent Key
+      const keyLabel = document.createElement("label");
+      setText(keyLabel, "Agent Key");
+      const keyInput = document.createElement("input");
+      keyInput.type = "text";
+      keyInput.placeholder = "From Dine Settings > Printers";
+      setVal(keyInput, printer.agentKey);
+      keyInput.dataset.field = "agentKey";
+
+      // Actions
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const testBtn = document.createElement("button");
+      testBtn.className = "ghost";
+      setText(testBtn, "Test Print");
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "danger";
+      setText(removeBtn, "Remove");
+      actions.append(testBtn, removeBtn);
+
+      // Per-card status
+      const st = document.createElement("div");
+      st.className = "status";
+      st.id = "st" + index;
+
+      card.append(nameLabel, nameInput, row, pidLabel, pidInput, keyLabel, keyInput, actions, st);
+
+      // Wire events
+      card.querySelectorAll("input[data-field]").forEach(input => {
+        input.addEventListener("input", () => {
+          const field = input.dataset.field;
+          cfg.printers[index][field] = field === "port" ? Number(input.value) : input.value;
+        });
+      });
+
+      testBtn.addEventListener("click", async () => {
+        st.className = "status"; setText(st, "Sending…");
+        try {
+          const r = await window.agent.testPrinter(index);
+          st.className = r.ok ? "status ok" : "status err";
+          setText(st, r.ok ? "Printed" : r.error ?? "Failed");
+        } catch (e) {
+          st.className = "status err"; setText(st, e.message);
+        }
+      });
+
+      removeBtn.addEventListener("click", () => {
+        cfg.printers.splice(index, 1);
+        renderPrinters();
+      });
+
+      return card;
+    }
+
+    function renderPrinters() {
+      const list = document.getElementById("printers");
+      while (list.firstChild) list.removeChild(list.firstChild);
+      cfg.printers.forEach((p, i) => list.appendChild(buildPrinterCard(p, i)));
+    }
+
+    document.getElementById("addBtn").addEventListener("click", () => {
+      cfg.printers.push({ printerId: "", agentKey: "", host: "", port: 9100, name: "", paperWidth: 80 });
+      renderPrinters();
+    });
+
+    document.getElementById("serverUrl").addEventListener("input", e => {
+      cfg.serverUrl = e.target.value.trim();
+    });
+
+    document.getElementById("saveBtn").addEventListener("click", async () => {
+      const st = document.getElementById("globalStatus");
+      cfg.serverUrl = document.getElementById("serverUrl").value.trim();
+      st.className = "status"; setText(st, "Saving…");
+      try {
+        await window.agent.saveConfig(cfg);
+        st.className = "status ok"; setText(st, "Saved");
+        setTimeout(() => setText(st, ""), 2500);
+      } catch (e) {
+        st.className = "status err"; setText(st, e.message);
+      }
+    });
+
+    // Load initial config
+    window.agent.loadConfig().then(c => {
+      cfg = c;
+      document.getElementById("serverUrl").value = c.serverUrl || "";
+      renderPrinters();
+    });
+
+    window.agent.getVersion().then(v => {
+      document.title = "Kliovo Print Agent v" + v;
+    });
+  </script>
+</body>
+</html>
