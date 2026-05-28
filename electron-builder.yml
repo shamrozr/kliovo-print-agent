@@ -1,0 +1,46 @@
+appId: com.kliovo.print-agent
+productName: Kliovo Print Agent
+copyright: Copyright 2026 Kliovo
+
+directories:
+  output: release
+
+files:
+  - dist/**/*
+  - src/windows/settings/index.html
+  - assets/**/*
+  - package.json
+  - node_modules/**/*
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.ico
+
+nsis:
+  oneClick: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+  shortcutName: Kliovo Print Agent
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  icon: assets/icon.icns
+  category: public.app-category.utilities
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+dmg:
+  title: Kliovo Print Agent
+
+publish:
+  provider: github
+  owner: kliovo
+  repo: kliovo-print-agent
+  releaseType: release

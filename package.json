@@ -1,0 +1,26 @@
+{
+  "name": "kliovo-print-agent",
+  "version": "1.0.0",
+  "description": "Kliovo thermal print agent — routes ESC/POS jobs to local printers",
+  "main": "dist/main.js",
+  "author": "Kliovo",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev":      "tsc && electron dist/main.js",
+    "build":    "tsc",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:all": "npm run build && electron-builder --win --mac"
+  },
+  "dependencies": {
+    "electron-log":     "^5.1.7",
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "@types/node":      "^20.14.0",
+    "electron":         "^31.3.0",
+    "electron-builder": "^24.13.3",
+    "typescript":       "^5.4.5"
+  }
+}
