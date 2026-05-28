@@ -39,6 +39,7 @@ mac:
 
 dmg:
   title: Kliovo Print Agent
+  background: ~
 
 publish:
   provider: github
