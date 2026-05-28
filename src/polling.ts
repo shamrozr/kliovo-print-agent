@@ -56,6 +56,12 @@ export function startPolling(): NodeJS.Timeout {
     }
   };
 
-  const interval = consecutiveErrors > 5 ? BACKOFF_INTERVAL_MS : POLL_INTERVAL_MS;
-  return setInterval(tick, interval);
+  let currentInterval = POLL_INTERVAL_MS;
+  let timer = setTimeout(function run() {
+    tick().finally(() => {
+      currentInterval = consecutiveErrors > 5 ? BACKOFF_INTERVAL_MS : POLL_INTERVAL_MS;
+      timer = setTimeout(run, currentInterval);
+    });
+  }, currentInterval);
+  return timer;
 }

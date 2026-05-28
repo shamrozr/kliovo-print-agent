@@ -60,6 +60,21 @@ function buildPrinterCard(printer, index) {
   setVal(keyInput, printer.agentKey);
   keyInput.dataset.field = "agentKey";
 
+  const widthLabel = document.createElement("label");
+  setText(widthLabel, "Paper Width");
+  const widthSelect = document.createElement("select");
+  widthSelect.style.cssText = "width:100%;padding:8px 10px;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;font-size:13px;";
+  [["80mm (standard)", "80"], ["58mm (small)", "58"]].forEach(function(opt) {
+    const o = document.createElement("option");
+    o.value = opt[1];
+    setText(o, opt[0]);
+    if (String(printer.paperWidth || 80) === opt[1]) o.selected = true;
+    widthSelect.appendChild(o);
+  });
+  widthSelect.addEventListener("change", function() {
+    cfg.printers[index].paperWidth = Number(widthSelect.value);
+  });
+
   const actions = document.createElement("div");
   actions.className = "actions";
   const testBtn = document.createElement("button");
@@ -74,7 +89,7 @@ function buildPrinterCard(printer, index) {
   st.className = "status";
   st.id = "st" + index;
 
-  card.append(nameLabel, nameInput, row, pidLabel, pidInput, keyLabel, keyInput, actions, st);
+  card.append(nameLabel, nameInput, row, pidLabel, pidInput, keyLabel, keyInput, widthLabel, widthSelect, actions, st);
 
   card.querySelectorAll("input[data-field]").forEach(function(input) {
     input.addEventListener("input", function() {

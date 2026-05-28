@@ -6,10 +6,7 @@ let tray: Tray | null = null;
 export type TrayStatus = "green" | "yellow" | "red";
 
 function iconPath(status: TrayStatus): string {
-  const base = app.isPackaged
-    ? path.join(process.resourcesPath, "assets")
-    : path.join(__dirname, "..", "assets");
-  return path.join(base, `tray-${status}.png`);
+  return path.join(app.getAppPath(), "assets", `tray-${status}.png`);
 }
 
 export function createTray(openSettings: () => void): Tray {
