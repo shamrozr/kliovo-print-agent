@@ -36,10 +36,7 @@ function openSettings(): void {
     },
   });
 
-  const htmlPath = app.isPackaged
-    ? path.join(process.resourcesPath, "src", "windows", "settings", "index.html")
-    : path.join(__dirname, "..", "src", "windows", "settings", "index.html");
-
+  const htmlPath = path.join(app.getAppPath(), "src", "windows", "settings", "index.html");
   settingsWin.loadFile(htmlPath);
   settingsWin.on("closed", () => { settingsWin = null; });
 }
