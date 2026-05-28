@@ -41,6 +41,6 @@ dmg:
 
 publish:
   provider: github
-  owner: kliovo
+  owner: shamrozr
   repo: kliovo-print-agent
   releaseType: release
