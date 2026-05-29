@@ -1,5 +1,6 @@
 import { loadConfig, PrinterEntry } from "./config";
 import { deliverToPrinter } from "./deliver";
+import { recordResult } from "./health";
 import { logger } from "./logger";
 
 const POLL_INTERVAL_MS    = 2_000;
@@ -23,8 +24,15 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
     bytesBase64: string;
   };
 
+  logger.info(`[poll] received job ${printJobId} for ${printer.printerId}`);
   const bytes = Buffer.from(bytesBase64, "base64");
-  await deliverToPrinter(printer, bytes);
+  try {
+    await deliverToPrinter(printer, bytes);
+  } catch (e) {
+    recordResult({ printerId: printer.printerId, printerName: printer.name, kind: "queued", ok: false, error: (e as Error).message });
+    throw e;
+  }
+  recordResult({ printerId: printer.printerId, printerName: printer.name, kind: "queued", ok: true });
   logger.info(`[poll] printed job ${printJobId} on ${printer.printerId}`);
 
   await fetch(`${serverUrl}/api/print/${printJobId}`, {

@@ -5,6 +5,7 @@ import { startBridgeServer, setAppVersion } from "./bridge-server";
 import { startPolling } from "./polling";
 import { loadConfig, saveConfig } from "./config";
 import { deliverToPrinter } from "./deliver";
+import { recordResult } from "./health";
 import { listSystemPrinters } from "./system-printer";
 import { setupAutoUpdater } from "./updater";
 import { logger } from "./logger";
@@ -74,8 +75,10 @@ ipcMain.handle("printer:test", async (_, idx: number) => {
 
   try {
     await deliverToPrinter(printer, bytes);
+    recordResult({ printerId: printer.printerId, printerName: printer.name, kind: "test", ok: true });
     return { ok: true };
   } catch (e) {
+    recordResult({ printerId: printer.printerId, printerName: printer.name, kind: "test", ok: false, error: (e as Error).message });
     return { ok: false, error: (e as Error).message };
   }
 });

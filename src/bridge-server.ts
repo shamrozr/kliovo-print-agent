@@ -1,6 +1,7 @@
 import http from "http";
 import { loadConfig } from "./config";
 import { deliverToPrinter } from "./deliver";
+import { recordResult, getHealthSnapshot } from "./health";
 import { renderJob, type PrintJobData } from "./render";
 import { logger } from "./logger";
 
@@ -76,6 +77,13 @@ export function startBridgeServer(): http.Server {
       return;
     }
 
+    // Health snapshot — lets the POS show "printed ✓ / failed ✗" and surface
+    // recent activity without tailing the agent log.
+    if (req.method === "GET" && req.url === "/status") {
+      send(200, { ok: true, version: appVersion, ...getHealthSnapshot() });
+      return;
+    }
+
     if (req.method === "POST" && req.url === "/print") {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
@@ -91,17 +99,22 @@ export function startBridgeServer(): http.Server {
           const pc = config.printers.find((p) => p.printerId === printerId);
           if (!pc) {
             logger.warn(`[bridge] unknown printer: ${printerId}`);
+            recordResult({ printerId: printerId ?? "?", printerName: printerId ?? "?", kind: "raw", ok: false, error: `Printer ${printerId} not in config` });
             send(404, { ok: false, error: `Printer ${printerId} not in config` });
             return;
           }
 
-          const bytes = Buffer.from(bytesBase64, "base64");
-          await deliverToPrinter(pc, bytes);
-          logger.info(`[bridge] printed job ${printJobId ?? "?"} on ${printerId}`);
-
-          if (printJobId) void ackJob(config.serverUrl, printJobId);
-
-          send(200, { ok: true });
+          logger.info(`[bridge] received raw job ${printJobId ?? "?"} for ${printerId}`);
+          try {
+            const bytes = Buffer.from(bytesBase64, "base64");
+            await deliverToPrinter(pc, bytes);
+            recordResult({ printerId, printerName: pc.name, kind: "raw", ok: true });
+            if (printJobId) void ackJob(config.serverUrl, printJobId);
+            send(200, { ok: true });
+          } catch (e) {
+            recordResult({ printerId, printerName: pc.name, kind: "raw", ok: false, error: (e as Error).message });
+            throw e;
+          }
         } catch (e) {
           logger.error(`[bridge] print error: ${(e as Error).message}`);
           send(500, { ok: false, error: (e as Error).message });
@@ -140,18 +153,23 @@ export function startBridgeServer(): http.Server {
           const pc = config.printers.find((p) => p.printerId === printerId);
           if (!pc) {
             logger.warn(`[bridge] render-print: unknown printer ${printerId}`);
+            recordResult({ printerId, printerName: printerId, kind: job.kind, ok: false, error: `Printer ${printerId} not in config` });
             send(404, { ok: false, error: `Printer ${printerId} not in config` });
             return;
           }
 
-          // The agent's local config is the source of truth for hardware width.
-          const bytes = renderJob(job, pc.paperWidth);
-          await deliverToPrinter(pc, bytes);
-          logger.info(`[bridge] rendered+printed ${job.kind} job ${printJobId ?? dedupKey ?? "?"} on ${printerId}`);
-
-          if (printJobId) void ackJob(config.serverUrl, printJobId);
-
-          send(200, { ok: true, rendered: true });
+          logger.info(`[bridge] received ${job.kind} job ${printJobId ?? dedupKey ?? "?"} for ${printerId}`);
+          try {
+            // The agent's local config is the source of truth for hardware width.
+            const bytes = renderJob(job, pc.paperWidth);
+            await deliverToPrinter(pc, bytes);
+            recordResult({ printerId, printerName: pc.name, kind: job.kind, ok: true });
+            if (printJobId) void ackJob(config.serverUrl, printJobId);
+            send(200, { ok: true, rendered: true });
+          } catch (e) {
+            recordResult({ printerId, printerName: pc.name, kind: job.kind, ok: false, error: (e as Error).message });
+            throw e;
+          }
         } catch (e) {
           logger.error(`[bridge] render-print error: ${(e as Error).message}`);
           send(500, { ok: false, error: (e as Error).message });
