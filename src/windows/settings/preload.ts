@@ -6,4 +6,5 @@ contextBridge.exposeInMainWorld("agent", {
   testPrinter: (idx: number)   => ipcRenderer.invoke("printer:test", idx),
   getVersion:  ()              => ipcRenderer.invoke("app:version"),
   listPrinters:()              => ipcRenderer.invoke("printers:list"),
+  getStatus:   ()              => ipcRenderer.invoke("health:snapshot"),
 });

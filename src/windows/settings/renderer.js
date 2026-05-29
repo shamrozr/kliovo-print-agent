@@ -205,6 +205,73 @@ function init() {
   });
 }
 
+// ── Live print-status panel ─────────────────────────────────
+function nameForPrinterId(printerId) {
+  const p = (cfg.printers || []).find(function(x) { return x.printerId === printerId; });
+  return (p && p.name) ? p.name : printerId;
+}
+
+function clockStr(ts) {
+  try { return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+  catch (e) { return ""; }
+}
+
+function renderHealth(snap) {
+  const dot   = document.getElementById("healthDot");
+  const label = document.getElementById("healthLabel");
+  const pls   = document.getElementById("healthPrinters");
+  const rec   = document.getElementById("healthRecent");
+
+  const status = (snap && snap.status) || "green";
+  dot.className = "dot " + status;
+  label.textContent =
+    status === "red"    ? "A printer is currently failing" :
+    status === "yellow" ? "Recent print issue — watching" :
+                          "Printing OK";
+
+  // Per-printer last result
+  while (pls.firstChild) pls.removeChild(pls.firstChild);
+  const printers = (snap && snap.printers) || [];
+  if (printers.length === 0) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "No print activity yet.";
+    pls.appendChild(e);
+  } else {
+    printers.forEach(function(p) {
+      const row = document.createElement("div");
+      row.className = "hprinter";
+      const d = document.createElement("span");
+      d.className = "dot " + (p.ok ? "green" : "red");
+      const nm = document.createElement("span");
+      nm.className = "nm";
+      nm.textContent = nameForPrinterId(p.printerId);
+      const det = document.createElement("span");
+      det.className = "det";
+      det.textContent = p.ok ? "last job OK" : "last job FAILED";
+      row.append(d, nm, det);
+      pls.appendChild(row);
+    });
+  }
+
+  // Recent activity (last few events)
+  while (rec.firstChild) rec.removeChild(rec.firstChild);
+  const events = (snap && snap.recent) || [];
+  events.slice(0, 6).forEach(function(ev) {
+    const line = document.createElement("div");
+    line.className = "ev";
+    const mark = ev.ok ? "✓" : "✗";
+    const who  = nameForPrinterId(ev.printerId);
+    line.textContent = clockStr(ev.ts) + "  " + mark + " " + ev.kind + " → " + who +
+      (ev.ok ? "" : ("  (" + (ev.error || "error") + ")"));
+    rec.appendChild(line);
+  });
+}
+
+function pollHealth() {
+  window.agent.getStatus().then(renderHealth).catch(function() {});
+}
+
 // Detect OS-installed printers first (for the USB picker), then render.
 window.agent.listPrinters().then(function(names) {
   systemPrinters = Array.isArray(names) ? names : [];
@@ -216,3 +283,7 @@ window.agent.listPrinters().then(function(names) {
 window.agent.getVersion().then(function(v) {
   document.title = "Kliovo Print Agent v" + v;
 });
+
+// Live status panel — poll the health snapshot every few seconds.
+pollHealth();
+setInterval(pollHealth, 3000);

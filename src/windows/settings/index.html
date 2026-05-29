@@ -37,10 +37,39 @@
     .status  { font-size: 11px; color: #64748b; min-height: 16px; }
     .ok      { color: #22c55e; }
     .err     { color: #ef4444; }
+
+    /* ── Live print-status panel ────────────────────────────── */
+    .health      { background: #1e293b; border-radius: 8px; padding: 14px;
+                   border: 1px solid #334155; }
+    .health-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .dot         { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+    .dot.green   { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+    .dot.yellow  { background: #eab308; box-shadow: 0 0 6px #eab30888; }
+    .dot.red     { background: #ef4444; box-shadow: 0 0 6px #ef444488; }
+    .health-head .lbl { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+    .hprinter    { display: flex; align-items: center; gap: 8px; padding: 6px 0;
+                   border-top: 1px solid #2a3a52; font-size: 12px; }
+    .hprinter:first-of-type { border-top: none; }
+    .hprinter .nm { color: #e2e8f0; font-weight: 500; }
+    .hprinter .det { color: #64748b; margin-left: auto; font-size: 11px; }
+    .recent      { margin-top: 12px; }
+    .recent .ev  { font-size: 11px; color: #94a3b8; padding: 3px 0;
+                   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .empty       { font-size: 12px; color: #64748b; }
   </style>
 </head>
 <body>
   <h1>Kliovo Print Agent</h1>
+
+  <div class="section">Print Status</div>
+  <div class="health" id="health">
+    <div class="health-head">
+      <span class="dot" id="healthDot"></span>
+      <span class="lbl" id="healthLabel">Loading…</span>
+    </div>
+    <div id="healthPrinters"></div>
+    <div class="recent" id="healthRecent"></div>
+  </div>
 
   <label for="serverUrl">Server URL</label>
   <input type="text" id="serverUrl" placeholder="https://dine.kliovo.com">

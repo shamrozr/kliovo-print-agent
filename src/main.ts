@@ -5,7 +5,7 @@ import { startBridgeServer, setAppVersion } from "./bridge-server";
 import { startPolling } from "./polling";
 import { loadConfig, saveConfig } from "./config";
 import { deliverToPrinter } from "./deliver";
-import { recordResult } from "./health";
+import { recordResult, getHealthSnapshot } from "./health";
 import { listSystemPrinters } from "./system-printer";
 import { setupAutoUpdater } from "./updater";
 import { logger } from "./logger";
@@ -48,6 +48,7 @@ ipcMain.handle("config:load",  ()        => loadConfig());
 ipcMain.handle("config:save",  (_, cfg)  => { saveConfig(cfg); setTrayStatus("green", openSettings); });
 ipcMain.handle("app:version",  ()        => app.getVersion());
 ipcMain.handle("printers:list", ()        => listSystemPrinters());
+ipcMain.handle("health:snapshot", ()      => getHealthSnapshot());
 
 ipcMain.handle("printer:test", async (_, idx: number) => {
   const config  = loadConfig();
