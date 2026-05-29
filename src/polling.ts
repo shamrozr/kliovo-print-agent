@@ -1,5 +1,5 @@
 import { loadConfig, PrinterEntry } from "./config";
-import { sendRawToPrinter } from "./tcp-sender";
+import { deliverToPrinter } from "./deliver";
 import { logger } from "./logger";
 
 const POLL_INTERVAL_MS    = 2_000;
@@ -24,7 +24,7 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
   };
 
   const bytes = Buffer.from(bytesBase64, "base64");
-  await sendRawToPrinter(printer.host, printer.port || 9100, bytes);
+  await deliverToPrinter(printer, bytes);
   logger.info(`[poll] printed job ${printJobId} on ${printer.printerId}`);
 
   await fetch(`${serverUrl}/api/print/${printJobId}`, {

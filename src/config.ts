@@ -5,8 +5,19 @@ import path from "path";
 export interface PrinterEntry {
   printerId:  string;
   agentKey:   string;
+  /**
+   * How the agent reaches this printer:
+   *   "network" — TCP socket to host:port (Ethernet/Wi-Fi printers, port 9100)
+   *   "system"  — RAW write to an OS print queue (USB printers via the
+   *               installed driver: Windows spooler / macOS+Linux CUPS)
+   * Defaults to "network" when omitted (back-compat with existing configs).
+   */
+  connection?: "network" | "system";
+  /** Network printers only. */
   host:       string;
   port:       number;
+  /** System printers only — the exact OS print-queue name (e.g. "XP-58"). */
+  systemPrinterName?: string;
   name:       string;
   paperWidth: 80 | 58;
 }

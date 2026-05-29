@@ -4,7 +4,8 @@ import { createTray, setTrayStatus } from "./tray";
 import { startBridgeServer, setAppVersion } from "./bridge-server";
 import { startPolling } from "./polling";
 import { loadConfig, saveConfig } from "./config";
-import { sendRawToPrinter } from "./tcp-sender";
+import { deliverToPrinter } from "./deliver";
+import { listSystemPrinters } from "./system-printer";
 import { setupAutoUpdater } from "./updater";
 import { logger } from "./logger";
 
@@ -45,11 +46,17 @@ function openSettings(): void {
 ipcMain.handle("config:load",  ()        => loadConfig());
 ipcMain.handle("config:save",  (_, cfg)  => { saveConfig(cfg); setTrayStatus("green", openSettings); });
 ipcMain.handle("app:version",  ()        => app.getVersion());
+ipcMain.handle("printers:list", ()        => listSystemPrinters());
 
 ipcMain.handle("printer:test", async (_, idx: number) => {
   const config  = loadConfig();
   const printer = config.printers[idx];
   if (!printer) return { ok: false, error: "Printer not found at index " + idx };
+
+  const target =
+    printer.connection === "system"
+      ? (printer.systemPrinterName || "(no printer selected)")
+      : `${printer.host}:${printer.port || 9100}`;
 
   // Minimal ESC/POS test page — hardcoded bytes, no user data involved
   const ESC = 0x1b, GS = 0x1d;
@@ -60,13 +67,13 @@ ipcMain.handle("printer:test", async (_, idx: number) => {
     ...Buffer.from("Kliovo\n"),
     ESC, 0x21, 0x00,                         // Normal size
     ...Buffer.from("Test Print\n"),
-    ...Buffer.from(`${printer.host}:${printer.port || 9100}\n`),
+    ...Buffer.from(`${target}\n`),
     ...Buffer.from(`${new Date().toLocaleString()}\n`),
     GS,  0x56, 0x42, 0x00,                  // Partial cut
   ]);
 
   try {
-    await sendRawToPrinter(printer.host, printer.port || 9100, bytes);
+    await deliverToPrinter(printer, bytes);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

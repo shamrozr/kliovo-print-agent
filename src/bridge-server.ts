@@ -1,6 +1,6 @@
 import http from "http";
 import { loadConfig } from "./config";
-import { sendRawToPrinter } from "./tcp-sender";
+import { deliverToPrinter } from "./deliver";
 import { renderJob, type PrintJobData } from "./render";
 import { logger } from "./logger";
 
@@ -96,7 +96,7 @@ export function startBridgeServer(): http.Server {
           }
 
           const bytes = Buffer.from(bytesBase64, "base64");
-          await sendRawToPrinter(pc.host, pc.port || 9100, bytes);
+          await deliverToPrinter(pc, bytes);
           logger.info(`[bridge] printed job ${printJobId ?? "?"} on ${printerId}`);
 
           if (printJobId) void ackJob(config.serverUrl, printJobId);
@@ -146,7 +146,7 @@ export function startBridgeServer(): http.Server {
 
           // The agent's local config is the source of truth for hardware width.
           const bytes = renderJob(job, pc.paperWidth);
-          await sendRawToPrinter(pc.host, pc.port || 9100, bytes);
+          await deliverToPrinter(pc, bytes);
           logger.info(`[bridge] rendered+printed ${job.kind} job ${printJobId ?? dedupKey ?? "?"} on ${printerId}`);
 
           if (printJobId) void ackJob(config.serverUrl, printJobId);

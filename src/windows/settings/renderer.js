@@ -1,6 +1,9 @@
 // Settings window renderer — loaded as external script so CSP 'self' allows it
 
 let cfg = { serverUrl: "", printers: [] };
+let systemPrinters = [];   // OS-detected print-queue names (USB etc.)
+
+const SELECT_CSS = "width:100%;padding:8px 10px;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;font-size:13px;";
 
 function setText(el, val) { el.textContent = String(val ?? ""); }
 function setVal(el, val)  { el.value = String(val ?? ""); }
@@ -10,6 +13,8 @@ function buildPrinterCard(printer, index) {
   card.className = "card";
   card.dataset.index = String(index);
 
+  const connType = printer.connection === "system" ? "system" : "network";
+
   const nameLabel = document.createElement("label");
   setText(nameLabel, "Name");
   const nameInput = document.createElement("input");
@@ -18,6 +23,24 @@ function buildPrinterCard(printer, index) {
   setVal(nameInput, printer.name);
   nameInput.dataset.field = "name";
 
+  // ── Connection type ────────────────────────────────────────
+  const connLabel = document.createElement("label");
+  setText(connLabel, "Connection");
+  const connSelect = document.createElement("select");
+  connSelect.style.cssText = SELECT_CSS;
+  [["Network (Ethernet / Wi-Fi)", "network"], ["USB (this PC's printer)", "system"]].forEach(function(opt) {
+    const o = document.createElement("option");
+    o.value = opt[1];
+    setText(o, opt[0]);
+    if (connType === opt[1]) o.selected = true;
+    connSelect.appendChild(o);
+  });
+  connSelect.addEventListener("change", function() {
+    cfg.printers[index].connection = connSelect.value;
+    renderPrinters();
+  });
+
+  // ── Network fields (IP + Port) ─────────────────────────────
   const row = document.createElement("div");
   row.className = "row";
 
@@ -43,6 +66,31 @@ function buildPrinterCard(printer, index) {
   portWrap.append(portLabel, portInput);
 
   row.append(ipWrap, portWrap);
+
+  // ── System (USB) fields — printer queue name + detect list ─
+  const sysWrap = document.createElement("div");
+  const sysLabel = document.createElement("label");
+  setText(sysLabel, "Windows / System Printer");
+  const sysInput = document.createElement("input");
+  sysInput.type = "text";
+  sysInput.placeholder = "e.g. XP-58  (or pick from the list)";
+  setVal(sysInput, printer.systemPrinterName);
+  sysInput.dataset.field = "systemPrinterName";
+  const listId = "syslist" + index;
+  sysInput.setAttribute("list", listId);
+  const dataList = document.createElement("datalist");
+  dataList.id = listId;
+  systemPrinters.forEach(function(nm) {
+    const o = document.createElement("option");
+    o.value = nm;
+    dataList.appendChild(o);
+  });
+  const sysHint = document.createElement("div");
+  sysHint.className = "status";
+  setText(sysHint, systemPrinters.length
+    ? "Detected " + systemPrinters.length + " printer(s) — choose the one your USB printer installed as."
+    : "Type the exact printer name from Windows Settings > Printers.");
+  sysWrap.append(sysLabel, sysInput, dataList, sysHint);
 
   const pidLabel = document.createElement("label");
   setText(pidLabel, "Printer ID");
@@ -89,7 +137,8 @@ function buildPrinterCard(printer, index) {
   st.className = "status";
   st.id = "st" + index;
 
-  card.append(nameLabel, nameInput, row, pidLabel, pidInput, keyLabel, keyInput, widthLabel, widthSelect, actions, st);
+  const connectionFields = connType === "system" ? sysWrap : row;
+  card.append(nameLabel, nameInput, connLabel, connSelect, connectionFields, pidLabel, pidInput, keyLabel, keyInput, widthLabel, widthSelect, actions, st);
 
   card.querySelectorAll("input[data-field]").forEach(function(input) {
     input.addEventListener("input", function() {
@@ -125,7 +174,7 @@ function renderPrinters() {
 }
 
 document.getElementById("addBtn").addEventListener("click", function() {
-  cfg.printers.push({ printerId: "", agentKey: "", host: "", port: 9100, name: "", paperWidth: 80 });
+  cfg.printers.push({ printerId: "", agentKey: "", connection: "network", host: "", port: 9100, systemPrinterName: "", name: "", paperWidth: 80 });
   renderPrinters();
 });
 
@@ -148,10 +197,20 @@ document.getElementById("saveBtn").addEventListener("click", function() {
   });
 });
 
-window.agent.loadConfig().then(function(c) {
-  cfg = c;
-  document.getElementById("serverUrl").value = c.serverUrl || "";
-  renderPrinters();
+function init() {
+  window.agent.loadConfig().then(function(c) {
+    cfg = c;
+    document.getElementById("serverUrl").value = c.serverUrl || "";
+    renderPrinters();
+  });
+}
+
+// Detect OS-installed printers first (for the USB picker), then render.
+window.agent.listPrinters().then(function(names) {
+  systemPrinters = Array.isArray(names) ? names : [];
+  init();
+}).catch(function() {
+  init();
 });
 
 window.agent.getVersion().then(function(v) {
