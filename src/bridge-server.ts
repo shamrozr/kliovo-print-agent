@@ -1,9 +1,35 @@
 import http from "http";
 import { loadConfig } from "./config";
 import { sendRawToPrinter } from "./tcp-sender";
+import { renderJob, type PrintJobData } from "./render";
 import { logger } from "./logger";
 
 export const BRIDGE_PORT = 6310;
+
+// ── Idempotency guard ────────────────────────────────────────
+// A POS may re-send a job on retry (flaky network, reconnect). We dedup on
+// an idempotency key so the same ticket never prints twice within the window.
+const DEDUP_TTL_MS = 60_000;
+const recentJobs = new Map<string, number>();
+
+function seenRecently(key: string): boolean {
+  const now = Date.now();
+  for (const [k, ts] of recentJobs) {
+    if (now - ts > DEDUP_TTL_MS) recentJobs.delete(k);
+  }
+  if (recentJobs.has(key)) return true;
+  recentJobs.set(key, now);
+  return false;
+}
+
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });
+}
 
 export let appVersion = "1.0.0";
 export function setAppVersion(v: string) { appVersion = v; }
@@ -78,6 +104,56 @@ export function startBridgeServer(): http.Server {
           send(200, { ok: true });
         } catch (e) {
           logger.error(`[bridge] print error: ${(e as Error).message}`);
+          send(500, { ok: false, error: (e as Error).message });
+        }
+      });
+      return;
+    }
+
+    // ── Offline path: render a STRUCTURED job locally, then print ──────────
+    // No server round-trip needed. The POS posts a serializable PrintJobData
+    // (built from its own cache); the agent renders ESC/POS here and streams
+    // it to the printer. This is what keeps printing alive with no internet.
+    if (req.method === "POST" && req.url === "/render-print") {
+      readBody(req).then(async (raw) => {
+        try {
+          const { printJobId, printerId, idempotencyKey, job } = JSON.parse(raw) as {
+            printJobId?:     string;
+            printerId:       string;
+            idempotencyKey?: string;
+            job:             PrintJobData;
+          };
+
+          if (!printerId || !job || !job.kind) {
+            send(400, { ok: false, error: "printerId and job{kind,input} are required" });
+            return;
+          }
+
+          const dedupKey = idempotencyKey ?? printJobId;
+          if (dedupKey && seenRecently(dedupKey)) {
+            logger.info(`[bridge] dedup — skipped duplicate job ${dedupKey}`);
+            send(200, { ok: true, deduped: true });
+            return;
+          }
+
+          const config = loadConfig();
+          const pc = config.printers.find((p) => p.printerId === printerId);
+          if (!pc) {
+            logger.warn(`[bridge] render-print: unknown printer ${printerId}`);
+            send(404, { ok: false, error: `Printer ${printerId} not in config` });
+            return;
+          }
+
+          // The agent's local config is the source of truth for hardware width.
+          const bytes = renderJob(job, pc.paperWidth);
+          await sendRawToPrinter(pc.host, pc.port || 9100, bytes);
+          logger.info(`[bridge] rendered+printed ${job.kind} job ${printJobId ?? dedupKey ?? "?"} on ${printerId}`);
+
+          if (printJobId) void ackJob(config.serverUrl, printJobId);
+
+          send(200, { ok: true, rendered: true });
+        } catch (e) {
+          logger.error(`[bridge] render-print error: ${(e as Error).message}`);
           send(500, { ok: false, error: (e as Error).message });
         }
       });
