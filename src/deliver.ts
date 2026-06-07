@@ -6,8 +6,13 @@
 import type { PrinterEntry } from "./config";
 import { sendRawToPrinter } from "./tcp-sender";
 import { sendRawToSystemPrinter } from "./system-printer";
+import { sendRawToUsbDevice } from "./usb-raw-printer";
 
 export async function deliverToPrinter(pc: PrinterEntry, bytes: Buffer): Promise<void> {
+  if (pc.connection === "usb_raw") {
+    await sendRawToUsbDevice(pc.usbDevicePath ?? "", bytes);
+    return;
+  }
   if (pc.connection === "system") {
     await sendRawToSystemPrinter(pc.systemPrinterName ?? "", bytes);
     return;

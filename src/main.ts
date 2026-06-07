@@ -7,6 +7,7 @@ import { loadConfig, saveConfig } from "./config";
 import { deliverToPrinter } from "./deliver";
 import { recordResult, getHealthSnapshot } from "./health";
 import { listSystemPrinters } from "./system-printer";
+import { listRawUsbPrinters } from "./usb-raw-printer";
 import { setupAutoUpdater } from "./updater";
 import { logger } from "./logger";
 
@@ -47,7 +48,16 @@ function openSettings(): void {
 ipcMain.handle("config:load",  ()        => loadConfig());
 ipcMain.handle("config:save",  (_, cfg)  => { saveConfig(cfg); setTrayStatus("green", openSettings); });
 ipcMain.handle("app:version",  ()        => app.getVersion());
-ipcMain.handle("printers:list", ()        => listSystemPrinters());
+// Returns both transports so the UI can offer every reachable printer:
+//   queues — installed Windows/CUPS print queues (connection "system")
+//   usb    — raw USB printers with no queue (connection "usb_raw")
+ipcMain.handle("printers:list", async () => {
+  const [queues, usb] = await Promise.all([
+    listSystemPrinters().catch(() => [] as string[]),
+    listRawUsbPrinters().catch(() => []),
+  ]);
+  return { queues, usb };
+});
 ipcMain.handle("health:snapshot", ()      => getHealthSnapshot());
 
 ipcMain.handle("printer:test", async (_, idx: number) => {
@@ -56,9 +66,11 @@ ipcMain.handle("printer:test", async (_, idx: number) => {
   if (!printer) return { ok: false, error: "Printer not found at index " + idx };
 
   const target =
-    printer.connection === "system"
-      ? (printer.systemPrinterName || "(no printer selected)")
-      : `${printer.host}:${printer.port || 9100}`;
+    printer.connection === "usb_raw"
+      ? (printer.usbDevicePath || "(no USB device selected)")
+      : printer.connection === "system"
+        ? (printer.systemPrinterName || "(no printer selected)")
+        : `${printer.host}:${printer.port || 9100}`;
 
   // Minimal ESC/POS test page — hardcoded bytes, no user data involved
   const ESC = 0x1b, GS = 0x1d;
