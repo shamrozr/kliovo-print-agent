@@ -1,8 +1,7 @@
 // Settings window renderer — loaded as external script so CSP 'self' allows it
 
 let cfg = { serverUrl: "", printers: [] };
-let systemQueues = [];   // OS-installed print-queue names (Windows/CUPS)
-let usbDevices   = [];   // raw USB printers with no queue [{ path, name }]
+let systemPrinters = [];   // OS-detected print-queue names (USB etc.)
 
 const SELECT_CSS = "width:100%;padding:8px 10px;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;font-size:13px;";
 
@@ -14,8 +13,7 @@ function buildPrinterCard(printer, index) {
   card.className = "card";
   card.dataset.index = String(index);
 
-  // "usb" groups both queue-installed ("system") and raw-USB ("usb_raw") printers.
-  const connType = printer.connection === "network" ? "network" : "usb";
+  const connType = printer.connection === "system" ? "system" : "network";
 
   const nameLabel = document.createElement("label");
   setText(nameLabel, "Name");
@@ -30,7 +28,7 @@ function buildPrinterCard(printer, index) {
   setText(connLabel, "Connection");
   const connSelect = document.createElement("select");
   connSelect.style.cssText = SELECT_CSS;
-  [["Network (Ethernet / Wi-Fi)", "network"], ["USB (this PC's printer)", "usb"]].forEach(function(opt) {
+  [["Network (Ethernet / Wi-Fi)", "network"], ["USB (this PC's printer)", "system"]].forEach(function(opt) {
     const o = document.createElement("option");
     o.value = opt[1];
     setText(o, opt[0]);
@@ -38,12 +36,7 @@ function buildPrinterCard(printer, index) {
     connSelect.appendChild(o);
   });
   connSelect.addEventListener("change", function() {
-    if (connSelect.value === "network") {
-      cfg.printers[index].connection = "network";
-    } else if (cfg.printers[index].connection !== "usb_raw") {
-      // Entering USB mode — default to a queue printer until one is picked.
-      cfg.printers[index].connection = "system";
-    }
+    cfg.printers[index].connection = connSelect.value;
     renderPrinters();
   });
 
@@ -74,96 +67,30 @@ function buildPrinterCard(printer, index) {
 
   row.append(ipWrap, portWrap);
 
-  // ── USB fields — one picker covering both installed queues AND raw USB ─
+  // ── System (USB) fields — printer queue name + detect list ─
   const sysWrap = document.createElement("div");
   const sysLabel = document.createElement("label");
-  setText(sysLabel, "USB Printer");
-
-  const pickerRow = document.createElement("div");
-  pickerRow.className = "row";
-
-  const pick = document.createElement("select");
-  pick.style.cssText = SELECT_CSS;
-  pick.style.flex = "1";
-
-  const ph = document.createElement("option");
-  ph.value = ""; setText(ph, "— select a detected printer —");
-  pick.appendChild(ph);
-
-  // Group 1: installed Windows/CUPS print queues (connection "system")
-  if (systemQueues.length) {
-    const g = document.createElement("optgroup");
-    g.label = "Installed printers (in Windows Settings)";
-    systemQueues.forEach(function(nm) {
-      const o = document.createElement("option");
-      o.value = "system::" + nm; setText(o, nm);
-      if (printer.connection === "system" && printer.systemPrinterName === nm) o.selected = true;
-      g.appendChild(o);
-    });
-    pick.appendChild(g);
-  }
-
-  // Group 2: raw USB printers with no queue (connection "usb_raw")
-  if (usbDevices.length) {
-    const g = document.createElement("optgroup");
-    g.label = "USB printers (no driver / not in Settings)";
-    usbDevices.forEach(function(d) {
-      const o = document.createElement("option");
-      o.value = "usb_raw::" + d.path; setText(o, d.name);
-      if (printer.connection === "usb_raw" && printer.usbDevicePath === d.path) o.selected = true;
-      g.appendChild(o);
-    });
-    pick.appendChild(g);
-  }
-
-  pick.addEventListener("change", function() {
-    const v = pick.value;
-    const sep = v.indexOf("::");
-    if (sep === -1) return;
-    const kind = v.slice(0, sep);
-    const val  = v.slice(sep + 2);
-    if (kind === "system") {
-      cfg.printers[index].connection = "system";
-      cfg.printers[index].systemPrinterName = val;
-      cfg.printers[index].usbDevicePath = "";
-      setVal(sysInput, val);
-    } else {
-      cfg.printers[index].connection = "usb_raw";
-      cfg.printers[index].usbDevicePath = val;
-      cfg.printers[index].systemPrinterName = "";
-      setVal(sysInput, "");
-    }
-  });
-
-  const refreshBtn = document.createElement("button");
-  refreshBtn.className = "ghost";
-  refreshBtn.style.flex = "0 0 auto";
-  setText(refreshBtn, "Refresh");
-  refreshBtn.addEventListener("click", function() {
-    setText(sysHint, "Scanning for printers…");
-    detectPrinters().then(function() { renderPrinters(); });
-  });
-  pickerRow.append(pick, refreshBtn);
-
-  // Manual fallback: type an exact Windows queue name if it isn't auto-listed.
+  setText(sysLabel, "Windows / System Printer");
   const sysInput = document.createElement("input");
   sysInput.type = "text";
-  sysInput.placeholder = "…or type the exact Windows printer name";
+  sysInput.placeholder = "e.g. XP-58  (or pick from the list)";
   setVal(sysInput, printer.systemPrinterName);
-  sysInput.style.marginTop = "8px";
-  sysInput.addEventListener("input", function() {
-    cfg.printers[index].connection = "system";
-    cfg.printers[index].systemPrinterName = sysInput.value;
-    cfg.printers[index].usbDevicePath = "";
+  sysInput.dataset.field = "systemPrinterName";
+  const listId = "syslist" + index;
+  sysInput.setAttribute("list", listId);
+  const dataList = document.createElement("datalist");
+  dataList.id = listId;
+  systemPrinters.forEach(function(nm) {
+    const o = document.createElement("option");
+    o.value = nm;
+    dataList.appendChild(o);
   });
-
   const sysHint = document.createElement("div");
   sysHint.className = "status";
-  const total = systemQueues.length + usbDevices.length;
-  setText(sysHint, total
-    ? "Detected " + total + " printer(s). Pick yours — USB printers that aren't in Windows Settings appear in the second group."
-    : "No printers detected. Plug in the USB printer, then press Refresh.");
-  sysWrap.append(sysLabel, pickerRow, sysInput, sysHint);
+  setText(sysHint, systemPrinters.length
+    ? "Detected " + systemPrinters.length + " printer(s) — choose the one your USB printer installed as."
+    : "Type the exact printer name from Windows Settings > Printers.");
+  sysWrap.append(sysLabel, sysInput, dataList, sysHint);
 
   const pidLabel = document.createElement("label");
   setText(pidLabel, "Printer ID");
@@ -247,7 +174,7 @@ function renderPrinters() {
 }
 
 document.getElementById("addBtn").addEventListener("click", function() {
-  cfg.printers.push({ printerId: "", agentKey: "", connection: "network", host: "", port: 9100, systemPrinterName: "", usbDevicePath: "", name: "", paperWidth: 80 });
+  cfg.printers.push({ printerId: "", agentKey: "", connection: "network", host: "", port: 9100, systemPrinterName: "", name: "", paperWidth: 80 });
   renderPrinters();
 });
 
@@ -345,19 +272,13 @@ function pollHealth() {
   window.agent.getStatus().then(renderHealth).catch(function() {});
 }
 
-// Detect every reachable printer (installed queues + raw USB) for the picker.
-function detectPrinters() {
-  return window.agent.listPrinters().then(function(res) {
-    systemQueues = (res && Array.isArray(res.queues)) ? res.queues : [];
-    usbDevices   = (res && Array.isArray(res.usb))    ? res.usb    : [];
-  }).catch(function() {
-    systemQueues = [];
-    usbDevices = [];
-  });
-}
-
-// Detect printers first (for the USB picker), then render.
-detectPrinters().then(init);
+// Detect OS-installed printers first (for the USB picker), then render.
+window.agent.listPrinters().then(function(names) {
+  systemPrinters = Array.isArray(names) ? names : [];
+  init();
+}).catch(function() {
+  init();
+});
 
 window.agent.getVersion().then(function(v) {
   document.title = "Kliovo Print Agent v" + v;
