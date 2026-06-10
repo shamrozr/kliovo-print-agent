@@ -4,6 +4,14 @@ import { deliverToPrinter } from "./deliver";
 import { recordResult, getHealthSnapshot } from "./health";
 import { renderJob, type PrintJobData } from "./render";
 import { logger } from "./logger";
+import {
+  getPairingSecret,
+  getStatus,
+  getUnsynced,
+  applyMirror,
+  markSynced,
+  setState,
+} from "./store/repo";
 
 export const BRIDGE_PORT = 6310;
 
@@ -38,7 +46,7 @@ export function setAppVersion(v: string) { appVersion = v; }
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin":          "*",
   "Access-Control-Allow-Methods":         "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers":         "Content-Type",
+  "Access-Control-Allow-Headers":         "Content-Type, X-Agent-Secret",
   "Access-Control-Allow-Private-Network": "true",
 };
 
@@ -176,6 +184,80 @@ export function startBridgeServer(): http.Server {
         }
       });
       return;
+    }
+
+    // ── Offline store endpoints (localhost, secret-gated) ─────────────────
+    // The web mirrors warm data here and drives reconciliation. The agent NEVER
+    // calls the cloud — all of this is local. A pairing secret (provisioned to
+    // the web) gates writes/reads so a random page can't touch the store.
+    if (req.url && req.url.startsWith("/local/")) {
+      let secret: string;
+      try {
+        secret = getPairingSecret();
+      } catch {
+        send(503, { ok: false, error: "store not ready" });
+        return;
+      }
+      if (req.headers["x-agent-secret"] !== secret) {
+        send(401, { ok: false, error: "unauthorized" });
+        return;
+      }
+
+      const fail = (e: unknown) => {
+        logger.error(`[bridge] local error: ${(e as Error).message}`);
+        send(500, { ok: false, error: (e as Error).message });
+      };
+
+      if (req.method === "GET" && req.url === "/local/status") {
+        try {
+          send(200, { ok: true, status: getStatus() });
+        } catch (e) {
+          fail(e);
+        }
+        return;
+      }
+
+      if (req.method === "GET" && req.url === "/local/unsynced") {
+        try {
+          send(200, { ok: true, ...getUnsynced() });
+        } catch (e) {
+          fail(e);
+        }
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/local/mirror") {
+        readBody(req)
+          .then((raw) => {
+            try {
+              const { batches, entitled } = JSON.parse(raw || "{}") as {
+                batches?: { table: string; rows: Record<string, unknown>[] }[];
+                entitled?: boolean;
+              };
+              if (typeof entitled === "boolean") setState("entitled", String(entitled));
+              const upserted = applyMirror(Array.isArray(batches) ? batches : []);
+              send(200, { ok: true, upserted });
+            } catch (e) {
+              fail(e);
+            }
+          })
+          .catch(fail);
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/local/mark-synced") {
+        readBody(req)
+          .then((raw) => {
+            try {
+              const { ids } = JSON.parse(raw || "{}") as { ids?: string[] };
+              send(200, { ok: true, ...markSynced(Array.isArray(ids) ? ids : []) });
+            } catch (e) {
+              fail(e);
+            }
+          })
+          .catch(fail);
+        return;
+      }
     }
 
     send(404, { ok: false, error: "Not found" });
