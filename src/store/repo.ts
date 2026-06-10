@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import { getStore, prune } from "./db";
 
 // ── sync_state helpers ───────────────────────────────────────
@@ -17,14 +16,29 @@ export function setState(key: string, value: string): void {
     .run(key, value);
 }
 
-/** Localhost shared secret the web must present to read/write the store. */
-export function getPairingSecret(): string {
-  let secret = getState("pairing_secret");
-  if (!secret) {
-    secret = crypto.randomBytes(24).toString("hex");
-    setState("pairing_secret", secret);
-  }
-  return secret;
+/**
+ * Localhost shared secret the web must present to read/write the store.
+ * The secret is PROVISIONED BY THE WEB (see setPairingSecret) — the agent never
+ * generates or exposes it unauthenticated, so it can't leak to a random page.
+ * Returns null until the web has paired.
+ */
+export function getPairingSecret(): string | null {
+  return getState("pairing_secret");
+}
+
+/** Provision the pairing secret (bootstrap). Idempotent if the same secret is
+ *  re-sent; refuses a different secret once paired (requires an explicit unpair). */
+export function setPairingSecret(secret: string): { paired: boolean; error?: string } {
+  if (!secret || secret.length < 16) return { paired: false, error: "weak_or_missing_secret" };
+  const existing = getState("pairing_secret");
+  if (existing && existing !== secret) return { paired: false, error: "already_paired" };
+  if (!existing) setState("pairing_secret", secret);
+  return { paired: true };
+}
+
+/** Clear pairing (re-pair a machine). */
+export function unpair(): void {
+  setState("pairing_secret", "");
 }
 
 // ── Mirror ingest ────────────────────────────────────────────

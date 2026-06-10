@@ -6,6 +6,7 @@ import { renderJob, type PrintJobData } from "./render";
 import { logger } from "./logger";
 import {
   getPairingSecret,
+  setPairingSecret,
   getStatus,
   getUnsynced,
   applyMirror,
@@ -191,11 +192,32 @@ export function startBridgeServer(): http.Server {
     // calls the cloud — all of this is local. A pairing secret (provisioned to
     // the web) gates writes/reads so a random page can't touch the store.
     if (req.url && req.url.startsWith("/local/")) {
-      let secret: string;
+      // Pairing is the bootstrap — no secret required (the web provisions one;
+      // succeeds only when unpaired or re-sending the same secret).
+      if (req.method === "POST" && req.url === "/local/pair") {
+        readBody(req)
+          .then((raw) => {
+            try {
+              const { secret } = JSON.parse(raw || "{}") as { secret?: string };
+              const result = setPairingSecret(String(secret ?? ""));
+              send(result.paired ? 200 : 409, { ok: result.paired, ...result });
+            } catch (e) {
+              send(500, { ok: false, error: (e as Error).message });
+            }
+          })
+          .catch((e) => send(500, { ok: false, error: (e as Error).message }));
+        return;
+      }
+
+      let secret: string | null;
       try {
         secret = getPairingSecret();
       } catch {
         send(503, { ok: false, error: "store not ready" });
+        return;
+      }
+      if (!secret) {
+        send(409, { ok: false, error: "not_paired" });
         return;
       }
       if (req.headers["x-agent-secret"] !== secret) {
