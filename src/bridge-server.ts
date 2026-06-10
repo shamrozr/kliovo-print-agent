@@ -13,6 +13,19 @@ import {
   markSynced,
   setState,
 } from "./store/repo";
+import {
+  authenticate,
+  verifyToken,
+  getMenu,
+  getTables,
+  listOrders,
+  createOrder,
+  addPayment,
+  updateStatus,
+  addItem,
+  voidItem,
+  refundPayment,
+} from "./store/pos-repo";
 
 export const BRIDGE_PORT = 6310;
 
@@ -47,7 +60,7 @@ export function setAppVersion(v: string) { appVersion = v; }
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin":          "*",
   "Access-Control-Allow-Methods":         "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers":         "Content-Type, X-Agent-Secret",
+  "Access-Control-Allow-Headers":         "Content-Type, X-Agent-Secret, X-Aster-Token",
   "Access-Control-Allow-Private-Network": "true",
 };
 
@@ -206,6 +219,70 @@ export function startBridgeServer(): http.Server {
             }
           })
           .catch((e) => send(500, { ok: false, error: (e as Error).message }));
+        return;
+      }
+
+      // ── Offline POS login (no secret — verified against mirrored users) ──
+      if (req.method === "POST" && req.url === "/local/auth") {
+        readBody(req)
+          .then((raw) => {
+            try {
+              const { email, password } = JSON.parse(raw || "{}") as {
+                email?: string;
+                password?: string;
+              };
+              send(200, authenticate(String(email ?? ""), String(password ?? "")));
+            } catch (e) {
+              send(500, { ok: false, error: (e as Error).message });
+            }
+          })
+          .catch((e) => send(500, { ok: false, error: (e as Error).message }));
+        return;
+      }
+
+      // ── Offline POS endpoints (token-gated — used by the Aster app) ──
+      if (req.url.startsWith("/local/pos/")) {
+        const session = verifyToken(req.headers["x-aster-token"] as string | undefined);
+        if (!session) {
+          send(401, { ok: false, error: "unauthorized" });
+          return;
+        }
+        const okp = (data: object) => send(200, { ok: true, ...data });
+        const failp = (e: unknown) => {
+          logger.error(`[bridge] pos error: ${(e as Error).message}`);
+          send(500, { ok: false, error: (e as Error).message });
+        };
+        try {
+          if (req.method === "GET" && req.url === "/local/pos/menu") return okp({ menu: getMenu() });
+          if (req.method === "GET" && req.url === "/local/pos/tables") return okp({ tables: getTables() });
+          if (req.method === "GET" && req.url === "/local/pos/orders") return okp({ orders: listOrders() });
+          if (req.method === "POST" && req.url.startsWith("/local/pos/order/")) {
+            const route = req.url;
+            readBody(req)
+              .then((raw) => {
+                try {
+                  const b = JSON.parse(raw || "{}");
+                  if (route === "/local/pos/order/create") return okp({ order: createOrder(b) });
+                  if (route === "/local/pos/order/pay") return okp({ order: addPayment(b.orderId, b) });
+                  if (route === "/local/pos/order/status") return okp({ order: updateStatus(b.orderId, b.status) });
+                  if (route === "/local/pos/order/add-item") return okp({ order: addItem(b.orderId, b.item) });
+                  if (route === "/local/pos/order/void-item") return okp({ order: voidItem(b.orderId, b.itemId) });
+                  if (route === "/local/pos/order/refund") {
+                    const r = refundPayment(b.orderId, b.paymentId, b.reason, b.managerPin);
+                    return send(r.ok ? 200 : 403, { ...r });
+                  }
+                  send(404, { ok: false, error: "unknown pos route" });
+                } catch (e) {
+                  failp(e);
+                }
+              })
+              .catch(failp);
+            return;
+          }
+          send(404, { ok: false, error: "unknown pos route" });
+        } catch (e) {
+          failp(e);
+        }
         return;
       }
 
