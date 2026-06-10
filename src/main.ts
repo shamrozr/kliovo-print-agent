@@ -8,6 +8,7 @@ import { deliverToPrinter } from "./deliver";
 import { recordResult, getHealthSnapshot } from "./health";
 import { listSystemPrinters } from "./system-printer";
 import { setupAutoUpdater } from "./updater";
+import { initStore, prune } from "./store/db";
 import { logger } from "./logger";
 
 // Only one instance allowed
@@ -93,6 +94,22 @@ app.whenReady().then(() => {
 
   startBridgeServer();
   startPolling();
+
+  // Offline encrypted store (used only by offline-entitled tenants). Must never
+  // block printing — if it fails to initialise, the agent keeps printing fine.
+  try {
+    initStore();
+    prune(); // sweep on boot
+    setInterval(() => {
+      try {
+        prune();
+      } catch (e) {
+        logger.error("[store] prune failed:", e);
+      }
+    }, 60 * 60 * 1000); // hourly
+  } catch (e) {
+    logger.error("[store] init failed — offline features disabled this session:", e);
+  }
 
   // Register auto-start on login (Windows + macOS)
   app.setLoginItemSettings({ openAtLogin: true, openAsHidden: true });
