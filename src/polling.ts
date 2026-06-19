@@ -1,3 +1,4 @@
+import { app } from "electron";
 import { loadConfig, PrinterEntry } from "./config";
 import { deliverToPrinter } from "./deliver";
 import { recordResult } from "./health";
@@ -9,7 +10,13 @@ const BACKOFF_INTERVAL_MS = 10_000;
 async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<void> {
   const url = `${serverUrl}/api/print/pending?printerId=${encodeURIComponent(printer.printerId)}`;
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${printer.agentKey}` },
+    headers: {
+      Authorization: `Bearer ${printer.agentKey}`,
+      // Lets the server record a heartbeat (lastSeenAt + version) so the web UI
+      // shows the agent as connected even when the browser can't reach the local
+      // bridge (e.g. the web runs on a different device than the agent).
+      "X-Agent-Version": app.getVersion(),
+    },
     signal:  AbortSignal.timeout(8_000),
   });
 

@@ -12,15 +12,38 @@ import { initStore, prune } from "./store/db";
 import { getOfflineOverview } from "./store/repo";
 import { logger } from "./logger";
 
-// Only one instance allowed
-if (!app.requestSingleInstanceLock()) {
+let settingsWin: BrowserWindow | null = null;
+
+// Only one instance allowed. A SECOND launch (e.g. autostart + manual open, or a
+// lingering instance) must surface the running one — never fall through to bind
+// the bridge port again, which crashed with "EADDRINUSE 127.0.0.1:6310".
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
   app.quit();
+  process.exit(0); // hard stop so this duplicate never reaches whenReady/listen
 }
+
+app.on("second-instance", () => {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    if (settingsWin.isMinimized()) settingsWin.restore();
+    settingsWin.show();
+    settingsWin.focus();
+  } else {
+    openSettings();
+  }
+});
+
+// A stray async error must never kill a tray printing agent with a fatal dialog.
+// Log it and keep printing.
+process.on("uncaughtException", (err) => {
+  logger.error("[main] uncaughtException:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  logger.error("[main] unhandledRejection:", reason);
+});
 
 // Keep process alive when all windows close (tray app)
 app.on("window-all-closed", () => { /* intentional no-op — tray app stays alive */ });
-
-let settingsWin: BrowserWindow | null = null;
 
 function openSettings(): void {
   if (settingsWin && !settingsWin.isDestroyed()) {

@@ -362,6 +362,16 @@ export function startBridgeServer(): http.Server {
     send(404, { ok: false, error: "Not found" });
   });
 
+  // listen() reports EADDRINUSE via an async 'error' event, not a throw — without
+  // this handler it becomes an uncaught exception and a fatal dialog.
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      logger.error(`[bridge] port ${BRIDGE_PORT} already in use — another agent instance is running; bridge not started`);
+    } else {
+      logger.error(`[bridge] server error: ${err.message}`);
+    }
+  });
+
   server.listen(BRIDGE_PORT, "127.0.0.1", () => {
     logger.info(`[bridge] listening on http://127.0.0.1:${BRIDGE_PORT}`);
   });
