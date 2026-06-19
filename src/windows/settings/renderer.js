@@ -329,8 +329,10 @@ function fmtBytes(n) {
   if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
   return (n / 1048576).toFixed(1) + " MB";
 }
-function fmtMoney(paisa) {
-  return "Rs " + Math.round((Number(paisa) || 0) / 100).toLocaleString();
+function fmtMoney(amount) {
+  // Offline store amounts are in RUPEES (snapshot sends Decimal rupees; offline
+  // orders compute in rupees too), so don't divide by 100.
+  return "Rs " + Math.round(Number(amount) || 0).toLocaleString();
 }
 function ago(ts) {
   if (!ts) return "never";
