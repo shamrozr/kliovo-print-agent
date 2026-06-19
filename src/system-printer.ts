@@ -86,12 +86,26 @@ function ensurePs1(): string {
   return p;
 }
 
+// Translate the raw Win32 codes the spooler throws into something a restaurant
+// operator can act on, while keeping the original code for support.
+function explainWin32(detail: string): string {
+  const m = detail.match(/\((\d{3,5})\)/);
+  const code = m ? Number(m[1]) : 0;
+  const hints: Record<number, string> = {
+    5: "Access denied — run the agent as the same Windows user that installed the printer.",
+    1801: "Windows doesn't recognise this printer name — pick the exact name from the list.",
+    1722: "The Windows Print Spooler service isn't running — start it (services.msc → Print Spooler).",
+    1905: "Windows reports this printer as deleted/unavailable. Re-add the printer in Windows Settings → Printers. If it's a redirected/RDP printer it can't be used for raw printing — install the printer locally on this PC.",
+  };
+  return hints[code] ? `${detail} — ${hints[code]}` : detail;
+}
+
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { timeout: SPOOL_TIMEOUT_MS, windowsHide: true }, (err, _stdout, stderr) => {
       if (err) {
         const detail = (stderr || "").trim() || err.message;
-        return reject(new Error(detail));
+        return reject(new Error(explainWin32(detail)));
       }
       resolve();
     });
@@ -107,12 +121,20 @@ export async function sendRawToSystemPrinter(printerName: string, bytes: Buffer)
 
   try {
     if (process.platform === "win32") {
-      await run("powershell.exe", [
+      const psArgs = [
         "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
         "-File", ensurePs1(),
         "-PrinterName", printerName,
         "-FilePath", tmpBin,
-      ]);
+      ];
+      try {
+        await run("powershell.exe", psArgs);
+      } catch (e) {
+        // Spooler hiccups (e.g. StartDocPrinter 1905) are often transient — retry once.
+        logger.warn(`[system] raw print failed, retrying once: ${(e as Error).message}`);
+        await new Promise((r) => setTimeout(r, 600));
+        await run("powershell.exe", psArgs);
+      }
     } else {
       // macOS / Linux — CUPS raw passthrough.
       await run("lp", ["-d", printerName, "-o", "raw", tmpBin]);
