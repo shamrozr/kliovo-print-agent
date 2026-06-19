@@ -28,9 +28,10 @@ nsis:
   shortcutName: Kliovo Print Agent
 
 mac:
+  # zip (not dmg) — dmgbuild flakes on hosted runners (missing background.tiff /
+  # hdiutil detach), and zip is what electron-updater needs for macOS auto-update.
+  # Users unzip and drag Kliovo Print Agent.app to Applications.
   target:
-    - target: dmg
-      arch: [x64, arm64]
     - target: zip
       arch: [x64, arm64]
   icon: assets/icon.icns
