@@ -287,3 +287,216 @@ window.agent.getVersion().then(function(v) {
 // Live status panel — poll the health snapshot every few seconds.
 pollHealth();
 setInterval(pollHealth, 3000);
+
+// ── Tabs ────────────────────────────────────────────────────
+let activePane = "print";
+function selectTab(pane) {
+  activePane = pane;
+  document.querySelectorAll(".tab").forEach(function(b) {
+    b.classList.toggle("active", b.dataset.pane === pane);
+  });
+  document.getElementById("pane-print").classList.toggle("active", pane === "print");
+  document.getElementById("pane-offline").classList.toggle("active", pane === "offline");
+  if (pane === "offline") pollOffline();
+}
+document.querySelectorAll(".tab").forEach(function(b) {
+  b.addEventListener("click", function() { selectTab(b.dataset.pane); });
+});
+
+// ── Offline POS panel ───────────────────────────────────────
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+function fmtMoney(paisa) {
+  return "Rs " + Math.round((Number(paisa) || 0) / 100).toLocaleString();
+}
+function ago(ts) {
+  if (!ts) return "never";
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+}
+function badge(text, kind) {
+  const b = document.createElement("span");
+  b.className = "badge" + (kind ? " " + kind : "");
+  const d = document.createElement("span");
+  d.className = "bdot";
+  const t = document.createElement("span");
+  t.textContent = text;
+  b.append(d, t);
+  return b;
+}
+function pill(text, kind) {
+  const p = document.createElement("span");
+  p.className = "pill" + (kind ? " " + kind : "");
+  p.textContent = text;
+  return p;
+}
+function kpi(n, label, alert) {
+  const w = document.createElement("div");
+  w.className = "kpi";
+  const nn = document.createElement("div");
+  nn.className = "n" + (alert && Number(n) > 0 ? " alert" : "");
+  nn.textContent = String(n);
+  const ll = document.createElement("div");
+  ll.className = "l";
+  ll.textContent = label;
+  w.append(nn, ll);
+  return w;
+}
+// Build the "no staff cached" guidance out of DOM nodes (no innerHTML).
+function buildEmptyLoginHint() {
+  const h = document.createElement("div");
+  h.className = "hint";
+  function strong(t) { const s = document.createElement("b"); s.textContent = t; return s; }
+  h.append(
+    strong("No staff cached yet. "),
+    document.createTextNode("Offline login is primed from the web while online. Have an "),
+    strong("owner/admin sign in to Dine on this computer once"),
+    document.createTextNode(" to cache all staff at once — or each staff member can sign in to the web here once to cache their own login. After that they can log in to the offline POS during an outage.")
+  );
+  return h;
+}
+
+function renderOffline(res) {
+  const badges  = document.getElementById("offBadges");
+  const kpis    = document.getElementById("offKpis");
+  const uCard   = document.getElementById("offUsersCard");
+  const uCount  = document.getElementById("offUserCount");
+  const oCard   = document.getElementById("offOrdersCard");
+  const sCard   = document.getElementById("offStorageCard");
+  [badges, kpis, uCard, oCard, sCard].forEach(function(n) { while (n.firstChild) n.removeChild(n.firstChild); });
+  uCount.textContent = "";
+
+  if (!res || !res.ok) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = res && res.error ? ("Offline store not ready — " + res.error) : "Offline store not initialised.";
+    badges.appendChild(e);
+    return;
+  }
+  const d = res.data;
+
+  // Status badges
+  badges.appendChild(badge(d.entitled ? "Offline enabled" : "Not entitled", d.entitled ? "good" : "warn"));
+  badges.appendChild(badge(d.paired ? "Paired with web" : "Not paired yet", d.paired ? "good" : "warn"));
+  badges.appendChild(badge("Last sync " + ago(d.lastMirrorAt), d.lastMirrorAt ? "good" : "warn"));
+
+  // KPIs
+  kpis.appendChild(kpi(d.users.length, "Logins"));
+  kpis.appendChild(kpi(d.counts.ordersToday, "Today"));
+  kpis.appendChild(kpi(d.counts.offlineOrders, "Offline"));
+  kpis.appendChild(kpi(d.counts.unsyncedOrders, "Unsynced", true));
+
+  // Cached logins
+  uCount.textContent = d.users.length + " staff can log in offline";
+  if (d.users.length === 0) {
+    uCard.appendChild(buildEmptyLoginHint());
+  } else {
+    const tbl = document.createElement("table");
+    tbl.className = "tbl";
+    const thead = document.createElement("thead");
+    const htr = document.createElement("tr");
+    ["Name", "Email", "Role", "Manager PIN", ""].forEach(function(h) {
+      const th = document.createElement("th");
+      th.textContent = h;
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr);
+    tbl.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    d.users.forEach(function(u) {
+      const tr = document.createElement("tr");
+      const tdN = document.createElement("td"); tdN.textContent = u.name || "—";
+      const tdE = document.createElement("td"); tdE.className = "muted"; tdE.textContent = u.email || "—";
+      const tdR = document.createElement("td"); tdR.appendChild(pill(u.role || "—", "role"));
+      const tdP = document.createElement("td");
+      tdP.appendChild(u.hasPin ? pill("set", "pin") : pill("—"));
+      const tdS = document.createElement("td");
+      if (!u.isActive) tdS.appendChild(pill("inactive", "off"));
+      tr.append(tdN, tdE, tdR, tdP, tdS);
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    uCard.appendChild(tbl);
+  }
+
+  // Recent orders
+  if (!d.recentOrders.length) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "No orders cached yet.";
+    oCard.appendChild(e);
+  } else {
+    const tbl = document.createElement("table");
+    tbl.className = "tbl";
+    const thead = document.createElement("thead");
+    const htr = document.createElement("tr");
+    ["Reference", "Status", "Total", "Source", "Synced"].forEach(function(h) {
+      const th = document.createElement("th");
+      th.textContent = h;
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr);
+    tbl.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    d.recentOrders.forEach(function(o) {
+      const tr = document.createElement("tr");
+      const tdR = document.createElement("td"); tdR.textContent = o.reference || "—";
+      const tdSt = document.createElement("td"); tdSt.appendChild(pill(o.status || "—"));
+      const tdT = document.createElement("td"); tdT.textContent = fmtMoney(o.total_amount);
+      const tdSrc = document.createElement("td");
+      tdSrc.appendChild(o.origin === "offline" ? pill("offline", "ofl") : pill("online", "onl"));
+      const tdSy = document.createElement("td");
+      if (o.origin === "offline") {
+        tdSy.appendChild(o.synced_at ? pill("synced", "onl") : pill("pending", "ofl"));
+      } else {
+        tdSy.className = "muted"; tdSy.textContent = "—";
+      }
+      tr.append(tdR, tdSt, tdT, tdSrc, tdSy);
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    oCard.appendChild(tbl);
+  }
+
+  // Storage
+  const rows = [
+    ["Encrypted database", fmtBytes(d.storage.dbBytes)],
+    ["Total orders kept", String(d.counts.orders)],
+    ["Online retention", d.storage.retentionDays + " days (auto-pruned)"],
+    ["Pending changes", String(d.counts.unsyncedChanges)],
+  ];
+  if (d.terminals.length) {
+    rows.push(["Terminals", d.terminals.map(function(t) { return t.code + " (next #" + t.nextSeq + ")"; }).join(", ")]);
+  }
+  rows.forEach(function(r) {
+    const line = document.createElement("div");
+    line.className = "meta";
+    const a = document.createElement("span"); a.textContent = r[0];
+    const b = document.createElement("span"); b.style.color = "#e2e8f0"; b.textContent = r[1];
+    line.append(a, b);
+    sCard.appendChild(line);
+  });
+  const pathLine = document.createElement("div");
+  pathLine.className = "meta";
+  pathLine.style.marginTop = "10px";
+  const pa = document.createElement("span"); pa.textContent = "Location";
+  const pb = document.createElement("span");
+  pb.className = "muted"; pb.style.fontFamily = "ui-monospace, Menlo, monospace";
+  pb.style.fontSize = "10px"; pb.style.maxWidth = "70%"; pb.style.textAlign = "right";
+  pb.style.wordBreak = "break-all"; pb.textContent = d.storage.dbPath;
+  pathLine.append(pa, pb);
+  sCard.appendChild(pathLine);
+}
+
+function pollOffline() {
+  if (activePane !== "offline") return;
+  window.agent.getOfflineOverview().then(renderOffline).catch(function() {});
+}
+setInterval(function() { if (activePane === "offline") pollOffline(); }, 5000);

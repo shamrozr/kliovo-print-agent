@@ -9,6 +9,7 @@ import { recordResult, getHealthSnapshot } from "./health";
 import { listSystemPrinters } from "./system-printer";
 import { setupAutoUpdater } from "./updater";
 import { initStore, prune } from "./store/db";
+import { getOfflineOverview } from "./store/repo";
 import { logger } from "./logger";
 
 // Only one instance allowed
@@ -50,6 +51,14 @@ ipcMain.handle("config:save",  (_, cfg)  => { saveConfig(cfg); setTrayStatus("gr
 ipcMain.handle("app:version",  ()        => app.getVersion());
 ipcMain.handle("printers:list", ()        => listSystemPrinters());
 ipcMain.handle("health:snapshot", ()      => getHealthSnapshot());
+ipcMain.handle("offline:overview", () => {
+  // Store may be uninitialised (init failed) — never throw into the UI.
+  try {
+    return { ok: true, data: getOfflineOverview() };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
 
 ipcMain.handle("printer:test", async (_, idx: number) => {
   const config  = loadConfig();

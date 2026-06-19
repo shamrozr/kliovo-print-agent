@@ -97,17 +97,25 @@ This keeps the local footprint tiny and minimises sensitive data at rest.
 Staff are created and managed **only in the cloud** (the Kliovo web app) — same as
 always: roles, passwords, manager PINs.
 
-1. **Online:** when an **admin/owner** signs into the web app **on the agent's
-   computer**, the web mirrors that branch's staff (with their bcrypt password and
-   PIN hashes, role, and permissions) down to the agent.
-   - This is **admin-gated**: a cashier's browser never carries PIN hashes.
-   - So **credentials are warmed only when an admin has been online on that machine**.
+1. **Online:** while a staff member is signed into the web app **on the agent's
+   computer**, the web mirrors staff credentials (bcrypt password + manager-PIN
+   hashes, role, permissions) down to the agent. Who gets warmed depends on who is
+   signed in — so no one ever receives another person's hashes:
+   - **Any staff member** (including a cashier) warms **their own** login. So each
+     person who signs into the web on this PC self-caches and can then use Aster.
+   - An **owner/admin** signing in warms the **whole branch at once** — one admin
+     sign-in primes every staff login, including their manager PINs.
+   - Practically: have an **owner/admin sign in once** to prime everyone, or let
+     each staff member sign into the web here once.
 2. **Offline:** staff sign into **Aster** with their **normal Kliovo email + password**.
    The agent verifies it against the mirrored bcrypt hash. Their role/permissions
    apply exactly as online; manager PIN gates refunds/voids.
-3. **Revocation caveat:** changing a role or removing a user takes effect on the
-   agent at the **next mirror** (next time an admin is online). The 2-day window and
-   frequent mirroring keep this short, but it is not instant while fully offline.
+3. **Visibility:** open the **Agent → Offline POS tab** to see exactly who is cached
+   ("Cached Logins"), how many orders are stored, sync state, and storage usage.
+4. **Revocation caveat:** changing a role or removing a user takes effect on the
+   agent at the **next mirror** (next time that user — or an admin — is online).
+   The 2-day window and frequent mirroring keep this short, but it is not instant
+   while fully offline.
 
 ---
 
@@ -115,9 +123,10 @@ always: roles, passwords, manager PINs.
 
 1. **Super Admin → Tenants → [tenant] → Offline POS tab → enable.**
 2. Install this **Agent** (printing + offline store) and the **Aster** app.
-3. While online, have an **admin** sign into the web app on this computer and leave
-   it open ~1 minute. This pairs the agent and warms menu, tables, today's orders,
-   **and staff logins**.
+3. While online, have an **owner/admin** sign into the web app on this computer and
+   leave it open ~1 minute. This pairs the agent and warms menu, tables, today's
+   orders, **and every staff login**. (Each cashier can also self-warm by signing in
+   here once.) Confirm it worked in the **Agent → Offline POS tab → Cached Logins**.
 4. **During an outage:** open **Aster** → staff sign in with their Kliovo email +
    password → take orders, collect payment, change status. Orders get offline
    numbers like `OFF-T1-00001`.
@@ -129,9 +138,12 @@ always: roles, passwords, manager PINs.
 
 ## Troubleshooting
 
-- **"Wrong email or password" in Aster, even with correct credentials** → the staff
-  table was never warmed. Make sure (a) Offline POS is enabled for the tenant, and
-  (b) an **admin** has signed into the web app on this computer while online.
+- **"Wrong email or password" in Aster, even with correct credentials** → that login
+  was never warmed. Open the **Agent → Offline POS tab → Cached Logins** to check who
+  is cached. If empty/missing: make sure (a) Offline POS is enabled for the tenant,
+  and (b) that staff member — or an **owner/admin** — has signed into the web app on
+  **this** computer while online.
 - **"Local service not found"** → the agent isn't running on this computer.
 - **Login worked once, new staff can't log in offline** → their account was added
-  after the last mirror; have an admin go online briefly to re-warm.
+  after the last mirror; have an admin (or that staff member) go online briefly to
+  re-warm, then re-check the Offline POS tab.

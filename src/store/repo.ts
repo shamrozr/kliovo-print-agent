@@ -1,4 +1,5 @@
-import { getStore, prune } from "./db";
+import fs from "fs";
+import { getStore, prune, DB_PATH } from "./db";
 
 // ── sync_state helpers ───────────────────────────────────────
 export function getState(key: string): string | null {
@@ -117,6 +118,94 @@ export function getStatus() {
     lastMirrorAt: lastMirror ? Number(lastMirror) : null,
     entitled,
     counts: { orders, unsyncedOrders, unsyncedChanges },
+  };
+}
+
+/**
+ * Rich snapshot for the agent's "Offline POS" settings tab. Read-only and
+ * NEVER returns password/PIN hashes — only who is cached + what's stored, so an
+ * operator can confirm offline logins are primed without exposing secrets.
+ */
+export function getOfflineOverview() {
+  const d = getStore();
+  const lastMirror = getState("last_mirror_at");
+  const entitled = getState("entitled") === "true";
+  const paired = !!getState("pairing_secret");
+
+  const users = d
+    .prepare(
+      `SELECT id, name, email, role, is_active,
+              (pin_hash IS NOT NULL AND pin_hash <> '') AS has_pin
+       FROM users ORDER BY is_active DESC, role, name`
+    )
+    .all() as Array<{
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    is_active: number;
+    has_pin: number;
+  }>;
+
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const c = d
+    .prepare(
+      `SELECT
+         count(*) AS total,
+         sum(CASE WHEN created_at >= @start THEN 1 ELSE 0 END) AS today,
+         sum(CASE WHEN origin = 'offline' THEN 1 ELSE 0 END) AS offline,
+         sum(CASE WHEN origin = 'offline' AND synced_at IS NULL THEN 1 ELSE 0 END) AS unsynced
+       FROM orders`
+    )
+    .get({ start: startOfDay.getTime() }) as Record<string, number | null>;
+  const unsyncedChanges = (
+    d.prepare("SELECT count(*) c FROM change_log WHERE synced_at IS NULL").get() as { c: number }
+  ).c;
+
+  const recentOrders = d
+    .prepare(
+      `SELECT reference, status, payment_status, total_amount, origin, synced_at, created_at
+       FROM orders ORDER BY created_at DESC LIMIT 15`
+    )
+    .all();
+
+  const seqRows = d
+    .prepare("SELECT key, value FROM sync_state WHERE key LIKE 'seq:%'")
+    .all() as Array<{ key: string; value: string }>;
+  const terminals = seqRows.map((r) => ({ code: r.key.slice(4), nextSeq: Number(r.value) + 1 }));
+
+  let dbBytes = 0;
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      dbBytes += fs.statSync(DB_PATH + suffix).size;
+    } catch {
+      /* file may not exist (e.g. no WAL yet) */
+    }
+  }
+
+  return {
+    entitled,
+    paired,
+    lastMirrorAt: lastMirror ? Number(lastMirror) : null,
+    users: users.map((u) => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      isActive: !!u.is_active,
+      hasPin: !!u.has_pin,
+    })),
+    counts: {
+      orders: c.total ?? 0,
+      ordersToday: c.today ?? 0,
+      offlineOrders: c.offline ?? 0,
+      unsyncedOrders: c.unsynced ?? 0,
+      unsyncedChanges,
+    },
+    storage: { dbPath: DB_PATH, dbBytes, retentionDays: 2 },
+    terminals,
+    recentOrders,
   };
 }
 
