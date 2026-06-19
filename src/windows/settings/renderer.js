@@ -201,9 +201,28 @@ function init() {
   window.agent.loadConfig().then(function(c) {
     cfg = c;
     document.getElementById("serverUrl").value = c.serverUrl || "";
+    document.getElementById("offlineDeviceKey").value = c.offlineDeviceKey || "";
     renderPrinters();
   });
 }
+
+// Save the offline device key (kept in the same config as printers/serverUrl).
+document.getElementById("saveKeyBtn").addEventListener("click", function() {
+  const st = document.getElementById("keyStatus");
+  cfg.offlineDeviceKey = document.getElementById("offlineDeviceKey").value.trim();
+  st.className = "status";
+  st.textContent = "Saving…";
+  window.agent.saveConfig(cfg).then(function() {
+    st.className = "status ok";
+    st.textContent = cfg.offlineDeviceKey
+      ? "Saved ✓ — pulling offline data… (give it a few seconds, then check below)"
+      : "Key cleared.";
+    setTimeout(pollOffline, 6000);
+  }).catch(function(e) {
+    st.className = "status err";
+    st.textContent = e.message;
+  });
+});
 
 // ── Live print-status panel ─────────────────────────────────
 function nameForPrinterId(printerId) {

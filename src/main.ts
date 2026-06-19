@@ -10,6 +10,7 @@ import { listSystemPrinters } from "./system-printer";
 import { setupAutoUpdater } from "./updater";
 import { initStore, prune } from "./store/db";
 import { getOfflineOverview } from "./store/repo";
+import { startCloudSync } from "./cloud-sync";
 import { logger } from "./logger";
 
 let settingsWin: BrowserWindow | null = null;
@@ -139,6 +140,10 @@ app.whenReady().then(() => {
         logger.error("[store] prune failed:", e);
       }
     }, 60 * 60 * 1000); // hourly
+
+    // Agent-pull offline sync — warms the store directly from the server using
+    // the branch's Offline device key. No key configured → no-op.
+    startCloudSync();
   } catch (e) {
     logger.error("[store] init failed — offline features disabled this session:", e);
   }

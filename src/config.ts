@@ -25,6 +25,12 @@ export interface PrinterEntry {
 export interface AgentConfig {
   serverUrl: string;
   printers:  PrinterEntry[];
+  /**
+   * Per-branch "Offline device key" (dok_…), pasted by an admin from Dine →
+   * Settings → Offline POS. The ONLY credential that lets this agent pull the
+   * branch's offline snapshot from the server. Empty = the agent pulls nothing.
+   */
+  offlineDeviceKey?: string;
 }
 
 const CONFIG_DIR  = app.getPath("userData");

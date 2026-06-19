@@ -148,6 +148,13 @@
 
   <!-- ── Offline POS pane ───────────────────────────────────── -->
   <div class="pane" id="pane-offline">
+    <label for="offlineDeviceKey">Offline Device Key</label>
+    <div class="row">
+      <input type="password" id="offlineDeviceKey" placeholder="dok_…  (from Dine → Settings → Offline POS)">
+      <button class="primary" id="saveKeyBtn">Save</button>
+    </div>
+    <div class="status" id="keyStatus" style="margin-bottom:6px;">Paste this branch's key so the agent can pull offline data on its own.</div>
+
     <div class="section">Offline Status</div>
     <div class="badges" id="offBadges"></div>
 
