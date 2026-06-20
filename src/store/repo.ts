@@ -175,6 +175,15 @@ export function getOfflineOverview() {
   const unsyncedChanges = (
     d.prepare("SELECT count(*) c FROM change_log WHERE synced_at IS NULL").get() as { c: number }
   ).c;
+  const countOf = (table: string): number => {
+    try {
+      return (d.prepare(`SELECT count(*) c FROM ${table}`).get() as { c: number }).c;
+    } catch {
+      return 0;
+    }
+  };
+  const menuItems = countOf("menu_items");
+  const combos = countOf("combos");
 
   const recentOrders = d
     .prepare(
@@ -215,6 +224,8 @@ export function getOfflineOverview() {
       offlineOrders: c.offline ?? 0,
       unsyncedOrders: c.unsynced ?? 0,
       unsyncedChanges,
+      menuItems,
+      combos,
     },
     storage: { dbPath: DB_PATH, dbBytes, retentionDays: 2 },
     terminals,

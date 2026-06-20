@@ -6,110 +6,111 @@
         content="default-src 'self'; script-src 'self'; style-src 'unsafe-inline'">
   <title>Kliovo Print Agent</title>
   <style>
+    /* Kliovo light theme — white surfaces, #22C55E accent, matches the POS. */
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-           font-size: 13px; background: #0f1117; color: #e2e8f0;
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+           font-size: 13px; background: #f6f8fa; color: #1f2937;
            padding: 20px; min-height: 100vh; }
-    h1   { font-size: 16px; font-weight: 600; margin-bottom: 20px; color: #f8fafc; }
-    label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;
+    h1   { font-size: 16px; font-weight: 600; margin-bottom: 18px; color: #0f172a; }
+    label { display: block; font-size: 11px; color: #64748b; margin-bottom: 4px;
             margin-top: 14px; text-transform: uppercase; letter-spacing: .05em; }
-    input { width: 100%; padding: 8px 10px; border-radius: 6px;
-            border: 1px solid #334155; background: #1e293b;
-            color: #f1f5f9; font-size: 13px; }
-    input:focus { outline: none; border-color: #3b82f6; }
-    .section { font-size: 12px; font-weight: 600; color: #94a3b8;
+    input { width: 100%; padding: 9px 11px; border-radius: 8px;
+            border: 1px solid #e2e8f0; background: #fff;
+            color: #1f2937; font-size: 13px; }
+    input:focus { outline: none; border-color: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.12); }
+    .section { font-size: 11px; font-weight: 600; color: #64748b;
                margin: 20px 0 10px; text-transform: uppercase; letter-spacing: .05em; }
-    .card    { background: #1e293b; border-radius: 8px; padding: 14px;
-               margin-bottom: 10px; border: 1px solid #334155; }
+    .card    { background: #fff; border-radius: 12px; padding: 14px;
+               margin-bottom: 10px; border: 1px solid #e8edf2; }
     .row     { display: flex; gap: 8px; margin-top: 8px; }
     .row input { flex: 1; }
     .actions { display: flex; gap: 8px; margin-top: 10px; }
-    button   { padding: 7px 14px; border-radius: 6px; border: none;
+    button   { padding: 8px 14px; border-radius: 8px; border: none;
                font-size: 12px; font-weight: 600; cursor: pointer; }
-    .primary { background: #3b82f6; color: #fff; }
-    .primary:hover { background: #2563eb; }
+    .primary { background: #22c55e; color: #fff; }
+    .primary:hover { background: #16a34a; }
     .danger  { background: #ef4444; color: #fff; }
     .danger:hover  { background: #dc2626; }
-    .ghost   { background: #334155; color: #cbd5e1; }
-    .ghost:hover   { background: #475569; }
+    .ghost   { background: #fff; color: #475569; border: 1px solid #e2e8f0; }
+    .ghost:hover   { background: #f1f5f9; }
     .footer  { display: flex; gap: 10px; margin-top: 24px;
                justify-content: flex-end; align-items: center; }
     .status  { font-size: 11px; color: #64748b; min-height: 16px; }
-    .ok      { color: #22c55e; }
-    .err     { color: #ef4444; }
+    .ok      { color: #16a34a; }
+    .err     { color: #dc2626; }
 
     /* ── Live print-status panel ────────────────────────────── */
-    .health      { background: #1e293b; border-radius: 8px; padding: 14px;
-                   border: 1px solid #334155; }
+    .health      { background: #fff; border-radius: 12px; padding: 14px;
+                   border: 1px solid #e8edf2; }
     .health-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
     .dot         { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-    .dot.green   { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
-    .dot.yellow  { background: #eab308; box-shadow: 0 0 6px #eab30888; }
-    .dot.red     { background: #ef4444; box-shadow: 0 0 6px #ef444488; }
-    .health-head .lbl { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+    .dot.green   { background: #22c55e; }
+    .dot.yellow  { background: #eab308; }
+    .dot.red     { background: #ef4444; }
+    .health-head .lbl { font-size: 13px; font-weight: 600; color: #1f2937; }
     .hprinter    { display: flex; align-items: center; gap: 8px; padding: 6px 0;
-                   border-top: 1px solid #2a3a52; font-size: 12px; }
+                   border-top: 1px solid #f1f5f9; font-size: 12px; }
     .hprinter:first-of-type { border-top: none; }
-    .hprinter .nm { color: #e2e8f0; font-weight: 500; }
-    .hprinter .det { color: #64748b; margin-left: auto; font-size: 11px; }
+    .hprinter .nm { color: #1f2937; font-weight: 500; }
+    .hprinter .det { color: #94a3b8; margin-left: auto; font-size: 11px; }
     .recent      { margin-top: 12px; }
-    .recent .ev  { font-size: 11px; color: #94a3b8; padding: 3px 0;
+    .recent .ev  { font-size: 11px; color: #64748b; padding: 3px 0;
                    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .empty       { font-size: 12px; color: #64748b; }
+    .empty       { font-size: 12px; color: #94a3b8; }
 
     /* ── Tabs ───────────────────────────────────────────────── */
     .tabs    { display: flex; gap: 4px; margin-bottom: 18px;
-               border-bottom: 1px solid #1e293b; }
-    .tab     { padding: 8px 14px; font-size: 12px; font-weight: 600;
-               color: #94a3b8; background: none; border: none; cursor: pointer;
+               border-bottom: 1px solid #e2e8f0; }
+    .tab     { padding: 9px 14px; font-size: 12px; font-weight: 600;
+               color: #64748b; background: none; border: none; cursor: pointer;
                border-bottom: 2px solid transparent; border-radius: 0; }
-    .tab:hover  { color: #cbd5e1; }
-    .tab.active { color: #f8fafc; border-bottom-color: #3b82f6; }
+    .tab:hover  { color: #334155; }
+    .tab.active { color: #0f172a; border-bottom-color: #22c55e; }
     .pane    { display: none; }
     .pane.active { display: block; }
 
     /* ── Offline POS panel ──────────────────────────────────── */
     .badges  { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
     .badge   { display: inline-flex; align-items: center; gap: 5px;
-               font-size: 11px; font-weight: 600; padding: 4px 9px;
-               border-radius: 999px; border: 1px solid #334155;
-               background: #1e293b; color: #cbd5e1; }
-    .badge .bdot { width: 7px; height: 7px; border-radius: 50%; background: #64748b; }
-    .badge.good  { border-color: #166534; background: #052e1a; color: #4ade80; }
+               font-size: 11px; font-weight: 600; padding: 4px 10px;
+               border-radius: 999px; border: 1px solid #e2e8f0;
+               background: #fff; color: #475569; }
+    .badge .bdot { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
+    .badge.good  { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
     .badge.good .bdot  { background: #22c55e; }
-    .badge.warn  { border-color: #854d0e; background: #2e1f05; color: #fbbf24; }
+    .badge.warn  { border-color: #fde68a; background: #fffbeb; color: #b45309; }
     .badge.warn .bdot  { background: #eab308; }
 
     .kpis    { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
                margin-bottom: 12px; }
-    .kpi     { background: #1e293b; border: 1px solid #334155; border-radius: 8px;
-               padding: 10px; text-align: center; }
-    .kpi .n  { font-size: 18px; font-weight: 700; color: #f8fafc; }
-    .kpi .n.alert { color: #fbbf24; }
-    .kpi .l  { font-size: 10px; color: #94a3b8; text-transform: uppercase;
+    .kpi     { background: #fff; border: 1px solid #e8edf2; border-radius: 12px;
+               padding: 12px 10px; text-align: center; }
+    .kpi .n  { font-size: 19px; font-weight: 700; color: #0f172a; }
+    .kpi .n.alert { color: #b45309; }
+    .kpi .l  { font-size: 10px; color: #64748b; text-transform: uppercase;
                letter-spacing: .04em; margin-top: 2px; }
 
-    .ucount  { font-size: 11px; color: #64748b; margin-left: auto; }
+    .ucount  { font-size: 11px; color: #94a3b8; margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
     table.tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
     table.tbl th { text-align: left; font-size: 10px; text-transform: uppercase;
-                   letter-spacing: .04em; color: #64748b; font-weight: 600;
-                   padding: 6px 6px; border-bottom: 1px solid #334155; }
-    table.tbl td { padding: 7px 6px; border-bottom: 1px solid #1e293b;
-                   color: #e2e8f0; }
+                   letter-spacing: .04em; color: #94a3b8; font-weight: 600;
+                   padding: 6px 6px; border-bottom: 1px solid #e2e8f0; }
+    table.tbl td { padding: 8px 6px; border-bottom: 1px solid #f1f5f9;
+                   color: #1f2937; }
     table.tbl tr:last-child td { border-bottom: none; }
-    .pill    { font-size: 10px; font-weight: 600; padding: 2px 7px;
-               border-radius: 999px; background: #334155; color: #cbd5e1; }
-    .pill.role { background: #1e3a5f; color: #93c5fd; }
-    .pill.pin  { background: #422006; color: #fbbf24; }
-    .pill.off  { background: #3f1d1d; color: #fca5a5; }
-    .pill.ofl  { background: #422006; color: #fbbf24; }
-    .pill.onl  { background: #14342b; color: #6ee7b7; }
-    .muted   { color: #64748b; }
-    .hint    { font-size: 12px; color: #94a3b8; line-height: 1.5;
-               background: #1e293b; border: 1px solid #334155; border-left: 3px solid #3b82f6;
-               border-radius: 6px; padding: 12px 14px; }
-    .hint b  { color: #f1f5f9; }
-    .meta    { font-size: 11px; color: #64748b; display: flex; justify-content: space-between;
+    .pill    { font-size: 10px; font-weight: 600; padding: 2px 8px;
+               border-radius: 999px; background: #f1f5f9; color: #475569; }
+    .pill.role { background: #dbeafe; color: #1d4ed8; }
+    .pill.pin  { background: #fef3c7; color: #b45309; }
+    .pill.off  { background: #fee2e2; color: #b91c1c; }
+    .pill.ofl  { background: #fef3c7; color: #b45309; }
+    .pill.onl  { background: #dcfce7; color: #15803d; }
+    .muted   { color: #94a3b8; }
+    .hint    { font-size: 12px; color: #475569; line-height: 1.55;
+               background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 3px solid #22c55e;
+               border-radius: 8px; padding: 12px 14px; }
+    .hint b  { color: #0f172a; }
+    .meta    { font-size: 11px; color: #94a3b8; display: flex; justify-content: space-between;
                margin-top: 6px; }
   </style>
 </head>

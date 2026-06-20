@@ -3,7 +3,7 @@
 let cfg = { serverUrl: "", printers: [] };
 let systemPrinters = [];   // OS-detected print-queue names (USB etc.)
 
-const SELECT_CSS = "width:100%;padding:8px 10px;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;font-size:13px;";
+const SELECT_CSS = "width:100%;padding:9px 11px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#1f2937;font-size:13px;";
 
 function setText(el, val) { el.textContent = String(val ?? ""); }
 function setVal(el, val)  { el.value = String(val ?? ""); }
@@ -111,7 +111,7 @@ function buildPrinterCard(printer, index) {
   const widthLabel = document.createElement("label");
   setText(widthLabel, "Paper Width");
   const widthSelect = document.createElement("select");
-  widthSelect.style.cssText = "width:100%;padding:8px 10px;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;font-size:13px;";
+  widthSelect.style.cssText = "width:100%;padding:9px 11px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#1f2937;font-size:13px;";
   [["80mm (standard)", "80"], ["58mm (small)", "58"]].forEach(function(opt) {
     const o = document.createElement("option");
     o.value = opt[1];
@@ -410,8 +410,8 @@ function renderOffline(res) {
 
   // KPIs
   kpis.appendChild(kpi(d.users.length, "Logins"));
-  kpis.appendChild(kpi(d.counts.ordersToday, "Today"));
-  kpis.appendChild(kpi(d.counts.offlineOrders, "Offline"));
+  kpis.appendChild(kpi(d.counts.menuItems ?? 0, "Menu items"));
+  kpis.appendChild(kpi(d.counts.combos ?? 0, "Combos"));
   kpis.appendChild(kpi(d.counts.unsyncedOrders, "Unsynced", true));
 
   // Cached logins
@@ -500,7 +500,7 @@ function renderOffline(res) {
     const line = document.createElement("div");
     line.className = "meta";
     const a = document.createElement("span"); a.textContent = r[0];
-    const b = document.createElement("span"); b.style.color = "#e2e8f0"; b.textContent = r[1];
+    const b = document.createElement("span"); b.style.color = "#1f2937"; b.textContent = r[1];
     line.append(a, b);
     sCard.appendChild(line);
   });
