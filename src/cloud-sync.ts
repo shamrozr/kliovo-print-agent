@@ -1,5 +1,10 @@
 import { loadConfig } from "./config";
-import { applyMirror, setState } from "./store/repo";
+import {
+  applyMirror,
+  setState,
+  getOfflineOrdersForPush,
+  markOrdersPushed,
+} from "./store/repo";
 import { logger } from "./logger";
 
 // How often the agent pulls the offline snapshot from the server. Offline data
@@ -57,8 +62,67 @@ async function syncOnce(): Promise<void> {
   }
 }
 
+/**
+ * Push offline-created orders up to the cloud staging queue (device-key auth).
+ * Non-destructive on the server — they wait there for a human to reconcile on
+ * the web "Offline Sync" screen. Once accepted we mark them locally so they're
+ * not re-pushed; re-pushing is harmless anyway (server upsert is idempotent).
+ */
+async function pushOnce(): Promise<void> {
+  const cfg = loadConfig();
+  const key = (cfg.offlineDeviceKey ?? "").trim();
+  if (!key || !cfg.serverUrl) return;
+
+  let toPush: ReturnType<typeof getOfflineOrdersForPush>;
+  try {
+    toPush = getOfflineOrdersForPush();
+  } catch (e) {
+    logger.warn(`[cloud-sync] read offline orders failed: ${(e as Error).message}`);
+    return;
+  }
+  if (toPush.length === 0) return;
+
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.serverUrl}/api/offline/orders/push`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ orders: toPush.map((t) => t.payload) }),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (e) {
+    logger.warn(`[cloud-sync] order push failed: ${(e as Error).message}`);
+    return;
+  }
+  if (res.status === 401) {
+    logger.warn("[cloud-sync] order push: device key rejected");
+    return;
+  }
+  if (!res.ok) {
+    logger.warn(`[cloud-sync] order push HTTP ${res.status}`);
+    return;
+  }
+
+  const body = (await res.json().catch(() => null)) as
+    | { accepted?: number; enabled?: boolean }
+    | null;
+  if (!body || body.enabled === false) return;
+  // The server accepted (or already had) every order we sent; mark them handed off.
+  try {
+    const marked = markOrdersPushed(toPush.map((t) => t.orderId));
+    logger.info(`[cloud-sync] pushed ${toPush.length} offline orders (accepted ${body.accepted ?? 0}, marked ${marked.marked})`);
+  } catch (e) {
+    logger.warn(`[cloud-sync] markOrdersPushed failed: ${(e as Error).message}`);
+  }
+}
+
+async function cycle(): Promise<void> {
+  await syncOnce();
+  await pushOnce();
+}
+
 export function startCloudSync(): NodeJS.Timeout {
   // Kick off shortly after boot, then on a timer.
-  setTimeout(() => void syncOnce(), 4_000);
-  return setInterval(() => void syncOnce(), SYNC_INTERVAL_MS);
+  setTimeout(() => void cycle(), 4_000);
+  return setInterval(() => void cycle(), SYNC_INTERVAL_MS);
 }

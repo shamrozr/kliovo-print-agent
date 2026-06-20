@@ -282,3 +282,99 @@ export function markSynced(changeLogIds: string[]): { marked: number } {
   prune();
   return { marked };
 }
+
+// ── Agent → cloud push of offline orders ─────────────────────────────────────
+// Build the reconciliation payloads for every offline order not yet handed to
+// the cloud. Amounts are rupees; we derive tax/service-charge RATES from the
+// stored amounts so the server can reproduce the exact offline totals.
+interface PushOrderPayload {
+  offlineRef: string;
+  capturedAt: string;
+  source?: string;
+  status?: string;
+  tableId?: string | null;
+  guestName?: string | null;
+  guestPhone?: string | null;
+  covers?: number | null;
+  taxRate?: number;
+  serviceChargeRate?: number;
+  discountAmount?: number;
+  items: Array<Record<string, unknown>>;
+  payments: Array<Record<string, unknown>>;
+  totals: { totalAmount: number; paidAmount: number };
+}
+
+export function getOfflineOrdersForPush(): { orderId: string; payload: PushOrderPayload }[] {
+  const d = getStore();
+  const orders = d
+    .prepare(
+      "SELECT * FROM orders WHERE origin = 'offline' AND synced_at IS NULL ORDER BY created_at ASC"
+    )
+    .all() as Array<Record<string, any>>;
+  const itemsStmt = d.prepare("SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order ASC");
+  const paysStmt = d.prepare("SELECT * FROM order_payments WHERE order_id = ?");
+
+  return orders.map((o) => {
+    const items = itemsStmt.all(o.id) as Array<Record<string, any>>;
+    const pays = paysStmt.all(o.id) as Array<Record<string, any>>;
+    const subtotal = Number(o.subtotal) || 0;
+    const taxRate = subtotal > 0 ? (Number(o.tax_amount) / subtotal) * 100 : 0;
+    const scRate = subtotal > 0 ? (Number(o.service_charge_amount) / subtotal) * 100 : 0;
+
+    const payload: PushOrderPayload = {
+      offlineRef: o.reference,
+      capturedAt: new Date(Number(o.created_at) || Date.now()).toISOString(),
+      source: o.source ?? "pos",
+      status: o.status ?? "completed",
+      tableId: o.table_id ?? null,
+      guestName: o.guest_name ?? null,
+      guestPhone: o.guest_phone ?? null,
+      covers: o.covers ?? null,
+      taxRate,
+      serviceChargeRate: scRate,
+      discountAmount: Number(o.discount_amount) || 0,
+      items: items.map((it) => ({
+        menuItemId: it.menu_item_id ?? null,
+        variantId: it.variant_id ?? null,
+        name: it.name,
+        quantity: Number(it.quantity) || 1,
+        unitPrice: Number(it.unit_price) || 0,
+        modifiers: safeParse(it.modifiers),
+        notes: it.notes ?? null,
+        course: it.course ?? null,
+        stationId: it.station_id ?? null,
+      })),
+      payments: pays
+        .filter((p) => !p.is_refunded)
+        .map((p) => ({
+          method: p.method,
+          amount: Number(p.amount) || 0,
+          tip: Number(p.tip) || 0,
+          note: p.note ?? null,
+        })),
+      totals: { totalAmount: Number(o.total_amount) || 0, paidAmount: Number(o.paid_amount) || 0 },
+    };
+    return { orderId: o.id, payload };
+  });
+}
+
+// Mark offline orders as handed to the cloud (so they're not re-pushed). The
+// server's staging queue is now the source of truth for reconciliation.
+export function markOrdersPushed(orderIds: string[]): { marked: number } {
+  if (!Array.isArray(orderIds) || orderIds.length === 0) return { marked: 0 };
+  const d = getStore();
+  const ph = orderIds.map(() => "?").join(", ");
+  const info = d
+    .prepare(`UPDATE orders SET synced_at = ? WHERE id IN (${ph})`)
+    .run(Date.now(), ...orderIds);
+  return { marked: info.changes };
+}
+
+function safeParse(s: unknown): unknown {
+  if (typeof s !== "string") return Array.isArray(s) ? s : [];
+  try {
+    return JSON.parse(s);
+  } catch {
+    return [];
+  }
+}
