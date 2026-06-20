@@ -148,6 +148,46 @@ function safeJson<T>(s: unknown, fallback: T): T {
   }
 }
 
+// ── Combos / deals ───────────────────────────────────────────
+export function getCombos() {
+  const d = getStore();
+  const combos = d.prepare("SELECT * FROM combos WHERE is_active = 1 ORDER BY sort_order").all() as any[];
+  const groupsStmt = d.prepare("SELECT * FROM combo_groups WHERE combo_id = ? ORDER BY sort_order");
+  const itemsStmt = d.prepare("SELECT * FROM combo_group_items WHERE combo_group_id = ?");
+  return combos.map((c) => ({
+    id: c.id,
+    name: c.name,
+    price: c.combo_price,
+    imageUrl: c.image_url,
+    groups: (groupsStmt.all(c.id) as any[]).map((g) => ({
+      id: g.id,
+      label: g.label,
+      items: (itemsStmt.all(g.id) as any[]).map((gi) => ({
+        id: gi.id,
+        menuItemId: gi.menu_item_id,
+        variantId: gi.variant_id,
+        isDefault: !!gi.is_default,
+        upcharge: gi.upcharge,
+      })),
+    })),
+  }));
+}
+
+// ── Payment + order config (synced from the tenant) ──────────
+export function getPaymentConfig() {
+  const d = getStore();
+  const read = (k: string): unknown => {
+    const row = d.prepare("SELECT value FROM settings WHERE key = ?").get(k) as { value: string } | undefined;
+    return row ? safeJson(row.value, null) : null;
+  };
+  return {
+    paymentMethods: read("payment_methods"),   // { enabledMethods, cashRoundToNearest, requireRefForCard }
+    methodDefs: read("payment_method_defs"),    // [{ key, label, flags... }]
+    orderConfig: read("order_config"),          // { taxRate, serviceChargeRate, currency }
+    disabledTabs: read("disabled_tabs"),
+  };
+}
+
 function logChange(
   entityType: string,
   entityId: string,

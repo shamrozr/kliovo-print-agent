@@ -18,6 +18,8 @@ import {
   verifyToken,
   getMenu,
   getTables,
+  getCombos,
+  getPaymentConfig,
   listOrders,
   createOrder,
   addPayment,
@@ -255,6 +257,8 @@ export function startBridgeServer(): http.Server {
         try {
           if (req.method === "GET" && req.url === "/local/pos/menu") return okp({ menu: getMenu() });
           if (req.method === "GET" && req.url === "/local/pos/tables") return okp({ tables: getTables() });
+          if (req.method === "GET" && req.url === "/local/pos/combos") return okp({ combos: getCombos() });
+          if (req.method === "GET" && req.url === "/local/pos/config") return okp({ config: getPaymentConfig() });
           if (req.method === "GET" && req.url === "/local/pos/orders") return okp({ orders: listOrders() });
           if (req.method === "POST" && req.url.startsWith("/local/pos/order/")) {
             const route = req.url;

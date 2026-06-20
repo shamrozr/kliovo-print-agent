@@ -108,6 +108,34 @@ CREATE TABLE IF NOT EXISTS settings (
   value         TEXT                 -- JSON
 );
 
+-- Combos / deals. Prices in rupees (REAL) to match the rest of the offline layer.
+CREATE TABLE IF NOT EXISTS combos (
+  id          TEXT PRIMARY KEY,
+  name        TEXT,
+  slug        TEXT,
+  combo_price REAL DEFAULT 0,
+  image_url   TEXT,
+  sort_order  INTEGER DEFAULT 0,
+  is_active   INTEGER DEFAULT 1,
+  updated_at  INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS combo_groups (
+  id         TEXT PRIMARY KEY,
+  combo_id   TEXT,
+  label      TEXT,
+  sort_order INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS combo_group_items (
+  id             TEXT PRIMARY KEY,
+  combo_group_id TEXT,
+  menu_item_id   TEXT,
+  variant_id     TEXT,
+  is_default     INTEGER DEFAULT 0,
+  upcharge       REAL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS orders (
   id                    TEXT PRIMARY KEY,
   reference             TEXT,

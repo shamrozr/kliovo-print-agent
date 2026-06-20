@@ -59,6 +59,9 @@ const MIRROR_TABLES: Record<string, string> = {
   orders: "id",
   order_items: "id",
   order_payments: "id",
+  combos: "id",
+  combo_groups: "id",
+  combo_group_items: "id",
 };
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -66,7 +69,10 @@ const IDENT = /^[a-z_][a-z0-9_]*$/i;
 /** Upsert a batch of rows for one whitelisted table (column-aware, FK-safe). */
 export function mirrorUpsert(table: string, rows: Record<string, unknown>[]): number {
   const pk = MIRROR_TABLES[table];
-  if (!pk) throw new Error(`mirror: table not allowed: ${table}`);
+  // Forward-compat: a newer server snapshot may include tables this agent
+  // version doesn't know yet. Skip them instead of throwing so the rest of the
+  // snapshot (menu, orders, staff, settings) still applies.
+  if (!pk) return 0;
   if (!Array.isArray(rows) || rows.length === 0) return 0;
 
   const d = getStore();
@@ -96,7 +102,14 @@ export function mirrorUpsert(table: string, rows: Record<string, unknown>[]): nu
 
 export function applyMirror(batches: { table: string; rows: Record<string, unknown>[] }[]): number {
   let total = 0;
-  for (const b of batches) total += mirrorUpsert(b.table, b.rows);
+  for (const b of batches) {
+    // One bad batch must not abort the whole snapshot.
+    try {
+      total += mirrorUpsert(b.table, b.rows);
+    } catch {
+      /* skip this batch, keep applying the rest */
+    }
+  }
   setState("last_mirror_at", String(Date.now()));
   return total;
 }
