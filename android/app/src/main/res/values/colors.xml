@@ -1,0 +1,10 @@
+<resources>
+    <color name="kliovo_green">#FF22C55E</color>
+    <color name="kliovo_green_dark">#FF16A34A</color>
+    <color name="kliovo_dark">#FF1F2937</color>
+    <color name="kliovo_bg">#FFF6F8FA</color>
+    <color name="kliovo_yellow">#FFEAB308</color>
+    <color name="kliovo_red">#FFEF4444</color>
+    <color name="kliovo_border">#FFE2E8F0</color>
+    <color name="kliovo_muted">#FF64748B</color>
+</resources>

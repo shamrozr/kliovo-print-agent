@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Kliovo Print Agent</string>
+    <string name="notification_channel_name">Print Bridge Service</string>
+    <string name="notification_channel_desc">Keeps the print bridge server running</string>
+</resources>
