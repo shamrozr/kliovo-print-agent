@@ -11,6 +11,11 @@ import { setupAutoUpdater } from "./updater";
 import { initStore, prune } from "./store/db";
 import { getOfflineOverview } from "./store/repo";
 import { startCloudSync } from "./cloud-sync";
+import { initAttendanceStore, pruneOldPunches } from "./biometric/attendance-store";
+import { startAttendanceSync } from "./biometric/attendance-sync";
+import { startAllBiometricDevices, stopAllBiometricDevices, getDeviceStatuses } from "./biometric/zk-adapter";
+import { getQueueDepth } from "./biometric/attendance-store";
+import { getLastSyncAt } from "./biometric/attendance-sync";
 import { logger } from "./logger";
 
 let settingsWin: BrowserWindow | null = null;
@@ -84,6 +89,19 @@ ipcMain.handle("offline:overview", () => {
   }
 });
 
+ipcMain.handle("biometric:status", () => {
+  try {
+    return {
+      ok: true,
+      queueDepth: getQueueDepth(),
+      lastSync: getLastSyncAt(),
+      devices: getDeviceStatuses(),
+    };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
 ipcMain.handle("printer:test", async (_, idx: number) => {
   const config  = loadConfig();
   const printer = config.printers[idx];
@@ -146,6 +164,22 @@ app.whenReady().then(() => {
     startCloudSync();
   } catch (e) {
     logger.error("[store] init failed — offline features disabled this session:", e);
+  }
+
+  // Biometric attendance — optional, no-op when no devices configured
+  try {
+    initAttendanceStore();
+    startAttendanceSync();
+    startAllBiometricDevices();
+    setInterval(() => {
+      try {
+        pruneOldPunches();
+      } catch (e) {
+        logger.error("[biometric] prune failed:", e);
+      }
+    }, 60 * 60 * 1000); // hourly
+  } catch (e) {
+    logger.error("[biometric] init failed:", e);
   }
 
   // Register auto-start on login (Windows + macOS)

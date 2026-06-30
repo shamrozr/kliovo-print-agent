@@ -1,6 +1,7 @@
 import { app } from "electron";
 import fs from "fs";
 import path from "path";
+import type { BiometricDeviceEntry } from "./biometric/types";
 
 export interface PrinterEntry {
   printerId:  string;
@@ -31,6 +32,13 @@ export interface AgentConfig {
    * branch's offline snapshot from the server. Empty = the agent pulls nothing.
    */
   offlineDeviceKey?: string;
+
+  /** Biometric attendance devices (ZKTeco TCP, ADMS HTTP, etc.). */
+  biometricDevices: BiometricDeviceEntry[];
+  /** Shared secret for authenticating punch pushes to the Dine server. */
+  attendanceDeviceSecret?: string;
+  /** Tenant slug used when pushing punches (identifies the restaurant). */
+  attendanceTenantSlug?: string;
 }
 
 const CONFIG_DIR  = app.getPath("userData");
@@ -39,6 +47,7 @@ const CONFIG_PATH = path.join(CONFIG_DIR, "agent-config.json");
 const DEFAULT_CONFIG: AgentConfig = {
   serverUrl: "https://dine.kliovo.com",
   printers:  [],
+  biometricDevices: [],
 };
 
 export function loadConfig(): AgentConfig {

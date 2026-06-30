@@ -19,7 +19,8 @@
     "bcryptjs": "^3.0.3",
     "better-sqlite3-multiple-ciphers": "^12.10.0",
     "electron-log": "^5.1.7",
-    "electron-updater": "^6.3.9"
+    "electron-updater": "^6.3.9",
+    "zkteco-js": "^1.7.2"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",

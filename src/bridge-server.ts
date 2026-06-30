@@ -13,6 +13,10 @@ import {
   markSynced,
   setState,
 } from "./store/repo";
+import { handleAdmsRequest } from "./biometric/adms-receiver";
+import { getQueueDepth } from "./biometric/attendance-store";
+import { getLastSyncAt } from "./biometric/attendance-sync";
+import { getDeviceStatuses } from "./biometric/zk-adapter";
 import {
   authenticate,
   verifyToken,
@@ -361,6 +365,33 @@ export function startBridgeServer(): http.Server {
           .catch(fail);
         return;
       }
+    }
+
+    // ── Biometric device routes (localhost only, no auth) ────────────────
+    if (req.method === "GET" && req.url === "/biometric/devices") {
+      const config = loadConfig();
+      send(200, { ok: true, devices: config.biometricDevices ?? [] });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/biometric/status") {
+      try {
+        send(200, {
+          ok: true,
+          queueDepth: getQueueDepth(),
+          lastSync: getLastSyncAt(),
+          devices: getDeviceStatuses(),
+        });
+      } catch (e) {
+        send(500, { ok: false, error: (e as Error).message });
+      }
+      return;
+    }
+
+    // ── ADMS HTTP push routes (ZKTeco devices POST attendance here) ──────
+    if (req.url && (req.url.startsWith("/iclock/"))) {
+      handleAdmsRequest(req, res, send);
+      return;
     }
 
     send(404, { ok: false, error: "Not found" });

@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld("agent", {
   listPrinters:()              => ipcRenderer.invoke("printers:list"),
   getStatus:   ()              => ipcRenderer.invoke("health:snapshot"),
   getOfflineOverview: ()       => ipcRenderer.invoke("offline:overview"),
+  biometricStatus:   ()       => ipcRenderer.invoke("biometric:status"),
 });
