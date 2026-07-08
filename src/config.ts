@@ -21,6 +21,15 @@ export interface PrinterEntry {
   systemPrinterName?: string;
   name:       string;
   paperWidth: 80 | 58;
+  /** "receipt" (default) or "label" — cosmetic; Dine renders the bytes, but
+   *  the agent shows the mode in the UI and can skip cutter-init for labels. */
+  printerMode?: "receipt" | "label";
+  /** Label roll width in mm (e.g. 40, 50, 60, 80). Display only. */
+  labelWidthMm?: number;
+  /** Label height in mm. Null = continuous roll. Display only. */
+  labelHeightMm?: number;
+  /** Gap detection type: "die_cut" | "black_mark" | "continuous". Display only. */
+  gapType?: "die_cut" | "black_mark" | "continuous";
 }
 
 export interface AgentConfig {

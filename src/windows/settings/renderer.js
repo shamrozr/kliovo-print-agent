@@ -14,6 +14,21 @@ function buildPrinterCard(printer, index) {
   card.dataset.index = String(index);
 
   const connType = printer.connection === "system" ? "system" : "network";
+  const printerMode = printer.printerMode === "label" ? "label" : "receipt";
+
+  // ── Mode badge (Receipt / Label) in card header ────────────
+  const header = document.createElement("div");
+  header.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:6px;";
+  const headerName = document.createElement("div");
+  headerName.style.cssText = "font-weight:600;color:#1f2937;font-size:13px;flex:1;";
+  setText(headerName, printer.name || "Untitled printer");
+  const modeBadge = document.createElement("span");
+  modeBadge.style.cssText = "font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:0.5px;"
+    + (printerMode === "label"
+      ? "background:#ecfdf5;color:#059669;border:1px solid #a7f3d0;"
+      : "background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;");
+  setText(modeBadge, printerMode);
+  header.append(headerName, modeBadge);
 
   const nameLabel = document.createElement("label");
   setText(nameLabel, "Name");
@@ -22,6 +37,7 @@ function buildPrinterCard(printer, index) {
   nameInput.placeholder = "e.g. Main Floor";
   setVal(nameInput, printer.name);
   nameInput.dataset.field = "name";
+  nameInput.addEventListener("input", function() { setText(headerName, nameInput.value || "Untitled printer"); });
 
   // ── Connection type ────────────────────────────────────────
   const connLabel = document.createElement("label");
@@ -123,6 +139,95 @@ function buildPrinterCard(printer, index) {
     cfg.printers[index].paperWidth = Number(widthSelect.value);
   });
 
+  // ── Printer Mode (Receipt / Label) ─────────────────────────
+  const modeLabel = document.createElement("label");
+  setText(modeLabel, "Printer Mode");
+  const modeSelect = document.createElement("select");
+  modeSelect.style.cssText = SELECT_CSS;
+  [["Receipt Printer", "receipt"], ["Label Printer", "label"]].forEach(function(opt) {
+    const o = document.createElement("option");
+    o.value = opt[1];
+    setText(o, opt[0]);
+    if (printerMode === opt[1]) o.selected = true;
+    modeSelect.appendChild(o);
+  });
+
+  // ── Label-only fields (width / height / gap type) ──────────
+  const labelWrap = document.createElement("div");
+  labelWrap.style.cssText = "display:" + (printerMode === "label" ? "block" : "none") + ";margin-top:8px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;";
+
+  function clampMm(v) {
+    if (v === "" || v == null) return undefined;
+    const n = Number(v);
+    if (!isFinite(n) || n <= 0) return undefined;
+    return Math.min(120, Math.max(10, Math.round(n)));
+  }
+
+  const labelRow = document.createElement("div");
+  labelRow.className = "row";
+
+  const lwWrap = document.createElement("div");
+  lwWrap.style.flex = "1";
+  const lwLabel = document.createElement("label");
+  setText(lwLabel, "Label Width (mm)");
+  const lwInput = document.createElement("input");
+  lwInput.type = "number";
+  lwInput.min = "10"; lwInput.max = "120";
+  lwInput.placeholder = "60";
+  setVal(lwInput, printer.labelWidthMm);
+  lwInput.addEventListener("input", function() {
+    cfg.printers[index].labelWidthMm = clampMm(lwInput.value);
+  });
+  lwWrap.append(lwLabel, lwInput);
+
+  const lhWrap = document.createElement("div");
+  lhWrap.style.flex = "1";
+  const lhLabel = document.createElement("label");
+  setText(lhLabel, "Label Height (mm — blank = continuous)");
+  const lhInput = document.createElement("input");
+  lhInput.type = "number";
+  lhInput.min = "10"; lhInput.max = "120";
+  lhInput.placeholder = "40";
+  setVal(lhInput, printer.labelHeightMm);
+  lhInput.addEventListener("input", function() {
+    cfg.printers[index].labelHeightMm = clampMm(lhInput.value);
+  });
+  lhWrap.append(lhLabel, lhInput);
+
+  labelRow.append(lwWrap, lhWrap);
+
+  const gapLabel = document.createElement("label");
+  setText(gapLabel, "Gap Type");
+  const gapSelect = document.createElement("select");
+  gapSelect.style.cssText = SELECT_CSS;
+  const currentGap = printer.gapType || "die_cut";
+  [["Die-cut labels", "die_cut"], ["Black mark", "black_mark"], ["Continuous roll", "continuous"]].forEach(function(opt) {
+    const o = document.createElement("option");
+    o.value = opt[1];
+    setText(o, opt[0]);
+    if (currentGap === opt[1]) o.selected = true;
+    gapSelect.appendChild(o);
+  });
+  gapSelect.addEventListener("change", function() {
+    cfg.printers[index].gapType = gapSelect.value;
+  });
+
+  labelWrap.append(labelRow, gapLabel, gapSelect);
+
+  modeSelect.addEventListener("change", function() {
+    const mode = modeSelect.value === "label" ? "label" : "receipt";
+    cfg.printers[index].printerMode = mode;
+    if (mode === "label" && !cfg.printers[index].gapType) {
+      cfg.printers[index].gapType = "die_cut";
+    }
+    labelWrap.style.display = mode === "label" ? "block" : "none";
+    setText(modeBadge, mode);
+    modeBadge.style.cssText = "font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:0.5px;"
+      + (mode === "label"
+        ? "background:#ecfdf5;color:#059669;border:1px solid #a7f3d0;"
+        : "background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;");
+  });
+
   const actions = document.createElement("div");
   actions.className = "actions";
   const testBtn = document.createElement("button");
@@ -138,7 +243,7 @@ function buildPrinterCard(printer, index) {
   st.id = "st" + index;
 
   const connectionFields = connType === "system" ? sysWrap : row;
-  card.append(nameLabel, nameInput, connLabel, connSelect, connectionFields, pidLabel, pidInput, keyLabel, keyInput, widthLabel, widthSelect, actions, st);
+  card.append(header, nameLabel, nameInput, connLabel, connSelect, connectionFields, pidLabel, pidInput, keyLabel, keyInput, widthLabel, widthSelect, modeLabel, modeSelect, labelWrap, actions, st);
 
   card.querySelectorAll("input[data-field]").forEach(function(input) {
     input.addEventListener("input", function() {
@@ -174,7 +279,7 @@ function renderPrinters() {
 }
 
 document.getElementById("addBtn").addEventListener("click", function() {
-  cfg.printers.push({ printerId: "", agentKey: "", connection: "network", host: "", port: 9100, systemPrinterName: "", name: "", paperWidth: 80 });
+  cfg.printers.push({ printerId: "", agentKey: "", connection: "network", host: "", port: 9100, systemPrinterName: "", name: "", paperWidth: 80, printerMode: "receipt" });
   renderPrinters();
 });
 
