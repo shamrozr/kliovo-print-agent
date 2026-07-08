@@ -2,7 +2,7 @@ import http from "http";
 import { loadConfig } from "./config";
 import { deliverToPrinter } from "./deliver";
 import { recordResult, getHealthSnapshot } from "./health";
-import { renderJob, type PrintJobData } from "./render";
+import { renderJob, renderContextFromPrinter, type PrintJobData } from "./render";
 import { logger } from "./logger";
 import {
   getPairingSecret,
@@ -188,8 +188,10 @@ export function startBridgeServer(): http.Server {
 
           logger.info(`[bridge] received ${job.kind} job ${printJobId ?? dedupKey ?? "?"} for ${printerId}`);
           try {
-            // The agent's local config is the source of truth for hardware width.
-            const bytes = renderJob(job, pc.paperWidth);
+            // The agent's local config is the source of truth for hardware
+            // dimensions AND for the printer's command language (a label
+            // printer that speaks TSPL/ZPL/EPL swallows ESC/POS silently).
+            const bytes = renderJob(job, renderContextFromPrinter(pc));
             await deliverToPrinter(pc, bytes);
             recordResult({ printerId, printerName: pc.name, kind: job.kind, ok: true });
             if (printJobId) void ackJob(config.serverUrl, printJobId);
