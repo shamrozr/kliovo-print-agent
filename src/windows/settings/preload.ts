@@ -9,4 +9,5 @@ contextBridge.exposeInMainWorld("agent", {
   getStatus:   ()              => ipcRenderer.invoke("health:snapshot"),
   getOfflineOverview: ()       => ipcRenderer.invoke("offline:overview"),
   biometricStatus:   ()       => ipcRenderer.invoke("biometric:status"),
+  getGitStatus: (refresh?: boolean) => ipcRenderer.invoke("system:gitStatus", !!refresh),
 });

@@ -16,6 +16,7 @@ import { startAttendanceSync } from "./biometric/attendance-sync";
 import { startAllBiometricDevices, stopAllBiometricDevices, getDeviceStatuses } from "./biometric/zk-adapter";
 import { getQueueDepth } from "./biometric/attendance-store";
 import { getLastSyncAt } from "./biometric/attendance-sync";
+import { getGitStatus, refreshGitStatus } from "./git-check";
 import { logger } from "./logger";
 
 let settingsWin: BrowserWindow | null = null;
@@ -89,6 +90,11 @@ ipcMain.handle("offline:overview", () => {
   }
 });
 
+ipcMain.handle("system:gitStatus", async (_, refresh?: boolean) => {
+  if (refresh) return refreshGitStatus();
+  return getGitStatus() ?? (await refreshGitStatus());
+});
+
 ipcMain.handle("biometric:status", () => {
   try {
     return {
@@ -142,6 +148,10 @@ app.whenReady().then(() => {
 
   createTray(openSettings);
   setTrayStatus("green", openSettings);
+
+  // Detect whether git is installed on the host so Settings can surface it.
+  // Fire-and-forget — result is cached for the UI to poll.
+  void refreshGitStatus();
 
   startBridgeServer();
   startPolling();
