@@ -3,3 +3,4 @@ dist/
 release/
 *.js.map
 .DS_Store
+package-lock.json
