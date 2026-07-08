@@ -1,6 +1,0 @@
-<resources>
-    <style name="Theme.KliovoPrintAgent" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:statusBarColor">@color/kliovo_green</item>
-        <item name="android:navigationBarColor">@android:color/white</item>
-    </style>
-</resources>
