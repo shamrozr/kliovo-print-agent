@@ -212,13 +212,37 @@ function buildPrinterCard(printer, index) {
     cfg.printers[index].gapType = gapSelect.value;
   });
 
-  labelWrap.append(labelRow, gapLabel, gapSelect);
+  // Command language the label printer speaks — ESC/POS won't work on any
+  // label printer, so let the operator pick TSPL / ZPL / EPL.
+  const langLabel = document.createElement("label");
+  setText(langLabel, "Label Command Language");
+  const langSelect = document.createElement("select");
+  langSelect.style.cssText = SELECT_CSS;
+  const currentLang = printer.labelLanguage || "tspl";
+  [["TSPL (TSC / Xprinter / Rongta — most USB labels)", "tspl"], ["ZPL (Zebra)", "zpl"], ["EPL (older Zebra)", "epl"]].forEach(function(opt) {
+    const o = document.createElement("option");
+    o.value = opt[1];
+    setText(o, opt[0]);
+    if (currentLang === opt[1]) o.selected = true;
+    langSelect.appendChild(o);
+  });
+  langSelect.addEventListener("change", function() {
+    cfg.printers[index].labelLanguage = langSelect.value;
+  });
+  const langHint = document.createElement("div");
+  langHint.className = "status";
+  setText(langHint, "If the test print does nothing, try a different language — your printer's manual lists which one it supports.");
+
+  labelWrap.append(labelRow, gapLabel, gapSelect, langLabel, langSelect, langHint);
 
   modeSelect.addEventListener("change", function() {
     const mode = modeSelect.value === "label" ? "label" : "receipt";
     cfg.printers[index].printerMode = mode;
     if (mode === "label" && !cfg.printers[index].gapType) {
       cfg.printers[index].gapType = "die_cut";
+    }
+    if (mode === "label" && !cfg.printers[index].labelLanguage) {
+      cfg.printers[index].labelLanguage = "tspl";
     }
     labelWrap.style.display = mode === "label" ? "block" : "none";
     setText(modeBadge, mode);

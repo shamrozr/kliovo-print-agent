@@ -30,6 +30,15 @@ export interface PrinterEntry {
   labelHeightMm?: number;
   /** Gap detection type: "die_cut" | "black_mark" | "continuous". Display only. */
   gapType?: "die_cut" | "black_mark" | "continuous";
+  /**
+   * Command language a label printer speaks. ESC/POS won't produce output on a
+   * label printer, so the test-print handler picks bytes based on this.
+   *   "tspl" — TSC / Xprinter / Rongta / most cheap USB label printers (default)
+   *   "zpl"  — Zebra
+   *   "epl"  — older Zebra (EPL2)
+   * Ignored when printerMode !== "label".
+   */
+  labelLanguage?: "tspl" | "zpl" | "epl";
 }
 
 export interface AgentConfig {

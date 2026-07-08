@@ -7,6 +7,7 @@ import { loadConfig, saveConfig } from "./config";
 import { deliverToPrinter } from "./deliver";
 import { recordResult, getHealthSnapshot } from "./health";
 import { listSystemPrinters } from "./system-printer";
+import { buildLabelTest } from "./render/label-test";
 import { setupAutoUpdater } from "./updater";
 import { initStore, prune } from "./store/db";
 import { getOfflineOverview } from "./store/repo";
@@ -112,19 +113,27 @@ ipcMain.handle("printer:test", async (_, idx: number) => {
       ? (printer.systemPrinterName || "(no printer selected)")
       : `${printer.host}:${printer.port || 9100}`;
 
-  // Minimal ESC/POS test page — hardcoded bytes, no user data involved
-  const ESC = 0x1b, GS = 0x1d;
-  const bytes = Buffer.from([
-    ESC, 0x40,                               // Initialize printer
-    ESC, 0x61, 0x01,                         // Center align
-    ESC, 0x21, 0x30,                         // Double height + width
-    ...Buffer.from("Kliovo\n"),
-    ESC, 0x21, 0x00,                         // Normal size
-    ...Buffer.from("Test Print\n"),
-    ...Buffer.from(`${target}\n`),
-    ...Buffer.from(`${new Date().toLocaleString()}\n`),
-    GS,  0x56, 0x42, 0x00,                  // Partial cut
-  ]);
+  // Label printers don't understand ESC/POS — they speak TSPL / ZPL / EPL —
+  // so branch on the configured printerMode. Sending ESC/POS to a label
+  // printer produces nothing (or a garbled feed), which is the whole reason
+  // the user's own label software prints fine but this test used to fail.
+  let bytes: Buffer;
+  if (printer.printerMode === "label") {
+    bytes = buildLabelTest(printer, target);
+  } else {
+    const ESC = 0x1b, GS = 0x1d;
+    bytes = Buffer.from([
+      ESC, 0x40,                               // Initialize printer
+      ESC, 0x61, 0x01,                         // Center align
+      ESC, 0x21, 0x30,                         // Double height + width
+      ...Buffer.from("Kliovo\n"),
+      ESC, 0x21, 0x00,                         // Normal size
+      ...Buffer.from("Test Print\n"),
+      ...Buffer.from(`${target}\n`),
+      ...Buffer.from(`${new Date().toLocaleString()}\n`),
+      GS,  0x56, 0x42, 0x00,                  // Partial cut
+    ]);
+  }
 
   try {
     await deliverToPrinter(printer, bytes);
