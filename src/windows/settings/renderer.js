@@ -538,6 +538,33 @@ function pollHealth() {
   window.agent.getStatus().then(renderHealth).catch(function() {});
 }
 
+function renderGitStatus(s) {
+  const dot = document.getElementById("gitDot");
+  const det = document.getElementById("gitDet");
+  if (!dot || !det) return;
+  if (!s) {
+    dot.className = "dot yellow";
+    det.textContent = "Checking…";
+    return;
+  }
+  if (s.installed) {
+    dot.className = "dot green";
+    det.textContent = s.version ? ("installed — " + s.version) : "installed";
+  } else {
+    dot.className = "dot red";
+    det.textContent = "not installed";
+  }
+}
+
+function pollGitStatus(refresh) {
+  if (!window.agent.getGitStatus) return;
+  window.agent.getGitStatus(!!refresh).then(renderGitStatus).catch(function() {
+    renderGitStatus({ installed: false });
+  });
+}
+pollGitStatus(true);
+setInterval(function() { pollGitStatus(false); }, 30_000);
+
 // ── System-printer detection ────────────────────────────────
 // The first scan can come back empty for reasons that have nothing to do with
 // the printer: PowerShell cold-starting on an old PC, the spooler restarting,

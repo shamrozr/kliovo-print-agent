@@ -23,4 +23,5 @@ contextBridge.exposeInMainWorld("agent", {
   biometricDeviceUsers:(e: unknown)  => ipcRenderer.invoke("biometric:device-users", e),
   biometricSyncStaff:  (e: unknown)  => ipcRenderer.invoke("biometric:sync-staff", e),
   biometricPollNow:    (e: unknown)  => ipcRenderer.invoke("biometric:poll-now", e),
+  getGitStatus: (refresh?: boolean) => ipcRenderer.invoke("system:gitStatus", !!refresh),
 });
