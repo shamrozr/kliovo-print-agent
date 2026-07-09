@@ -31,15 +31,28 @@ function saveState(state: ZkState): void {
   }
 }
 
+/** Persist the resolved hardware serial onto this device's config entry, once. */
+function cacheDeviceSerial(configDeviceId: string, serial: string): void {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { loadConfig, saveConfig } = require("../config") as typeof import("../config");
+  const cfg = loadConfig();
+  const entry = (cfg.biometricDevices ?? []).find((d) => d.id === configDeviceId);
+  if (entry && entry.serial !== serial) {
+    entry.serial = serial;
+    saveConfig(cfg);
+  }
+}
+
 interface ZkPoller {
   stop: () => void;
 }
 
 const activePollers = new Map<string, ZkPoller>();
+const resolvedSerials = new Map<string, string>(); // config device id -> hardware serial
 
 export async function startZkPolling(
   device: BiometricDeviceEntry,
-  onPunch: (punch: DevicePunch) => void
+  onPunch: (punch: DevicePunch, deviceSerial: string) => void
 ): Promise<ZkPoller> {
   const host = device.host ?? "192.168.1.201";
   const port = device.port ?? 4370;
@@ -49,6 +62,8 @@ export async function startZkPolling(
   let backoffMs = interval;
   const MAX_BACKOFF = 5 * 60_000; // 5 minutes
 
+  if (device.serial) resolvedSerials.set(device.id, device.serial);
+
   async function poll(): Promise<void> {
     if (stopped) return;
 
@@ -56,6 +71,31 @@ export async function startZkPolling(
     try {
       zk = new ZKLib(host, port, 5_000, 4_000);
       await zk.createSocket();
+
+      // Resolve + cache the real hardware serial once. This — not the agent's
+      // local config id — is what identifies the terminal to Dine, since two
+      // K70s on the same branch must never be confused with each other.
+      let serial = resolvedSerials.get(device.id);
+      if (!serial) {
+        try {
+          serial = await zk.getSerialNumber();
+          if (serial) {
+            resolvedSerials.set(device.id, serial);
+            cacheDeviceSerial(device.id, serial);
+          }
+        } catch (e) {
+          logger.warn(`[zk] ${device.name}: couldn't read serial number:`, (e as Error).message);
+        }
+      }
+
+      // Keep the terminal's onboard clock aligned with this PC's system time —
+      // the K70 has no NTP client, so drift here directly skews punch
+      // timestamps (and therefore lateness/hours calculations in Dine).
+      try {
+        await zk.setTime(new Date());
+      } catch (e) {
+        logger.warn(`[zk] ${device.name}: clock sync failed:`, (e as Error).message);
+      }
 
       const attendances = await zk.getAttendances();
       const logs = Array.isArray(attendances?.data) ? attendances.data : [];
@@ -65,12 +105,13 @@ export async function startZkPolling(
 
       if (logs.length > lastCount) {
         const newLogs = logs.slice(lastCount);
+        const effectiveSerial = serial ?? device.id;
         for (const entry of newLogs) {
           const punch: DevicePunch = {
             deviceUserId: String(entry.deviceUserId ?? entry.id ?? "unknown"),
             timestamp: entry.timestamp ?? new Date().toISOString(),
           };
-          onPunch(punch);
+          onPunch(punch, effectiveSerial);
         }
         state[device.id] = { lastCount: logs.length };
         saveState(state);
@@ -120,12 +161,12 @@ export function startAllBiometricDevices(): void {
   logger.info(`[zk] starting polling for ${zkDevices.length} ZK device(s)`);
 
   for (const device of zkDevices) {
-    void startZkPolling(device, (punch) => {
+    void startZkPolling(device, (punch, deviceSerial) => {
       queuePunch({
         deviceUserId: punch.deviceUserId,
         timestamp: punch.timestamp,
         direction: punch.direction,
-        deviceId: device.id,
+        deviceId: deviceSerial,
       });
     }).then((poller) => {
       activePollers.set(device.id, poller);
@@ -141,7 +182,7 @@ export function stopAllBiometricDevices(): void {
   activePollers.clear();
 }
 
-export function getDeviceStatuses(): Array<{ id: string; name: string; connected: boolean }> {
+export function getDeviceStatuses(): Array<{ id: string; name: string; connected: boolean; serial?: string }> {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { loadConfig } = require("../config") as { loadConfig: () => import("../config").AgentConfig };
   const config = loadConfig();
@@ -150,5 +191,6 @@ export function getDeviceStatuses(): Array<{ id: string; name: string; connected
     id: d.id,
     name: d.name,
     connected: d.enabled && activePollers.has(d.id),
+    serial: resolvedSerials.get(d.id) ?? d.serial,
   }));
 }

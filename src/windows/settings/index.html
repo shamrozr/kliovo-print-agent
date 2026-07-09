@@ -120,6 +120,7 @@
   <div class="tabs">
     <button class="tab active" id="tabPrintBtn" data-pane="print">Printing</button>
     <button class="tab" id="tabOfflineBtn" data-pane="offline">Offline POS</button>
+    <button class="tab" id="tabBioBtn" data-pane="biometric">Biometric</button>
   </div>
 
   <!-- ── Printing pane ──────────────────────────────────────── -->
@@ -172,6 +173,66 @@
 
     <div class="section">Storage</div>
     <div class="card" id="offStorageCard"></div>
+  </div>
+
+  <!-- ── Biometric pane ────────────────────────────────────── -->
+  <div class="pane" id="pane-biometric">
+
+    <!-- Sync config -->
+    <div class="section">Attendance Device Key</div>
+    <div class="card">
+      <label for="bioKey">Device Key <span style="color:#94a3b8;font-weight:400;text-transform:none">(from Dine → Settings → HR → Attendance)</span></label>
+      <input type="password" id="bioKey" placeholder="atk_…">
+      <div class="status" id="bioKeyHint" style="margin-top:6px">Scoped to this one branch only — separate from printing and offline POS keys.</div>
+      <div class="actions" style="margin-top:12px">
+        <button class="primary" id="bioSaveConfigBtn">Save Key</button>
+        <span class="status" id="bioConfigStatus"></span>
+      </div>
+    </div>
+
+    <!-- Sync status -->
+    <div class="section">Sync Status</div>
+    <div class="card" id="bioStatusCard">
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div class="kpi"><div class="n" id="bioQueueN">—</div><div class="l">Queued</div></div>
+        <div class="kpi"><div class="n" id="bioSyncN" style="font-size:12px;padding-top:4px">—</div><div class="l">Last Sync</div></div>
+      </div>
+      <div id="bioDeviceStatuses" style="margin-top:10px"></div>
+    </div>
+
+    <!-- Devices -->
+    <div class="section">ZKTeco Devices</div>
+    <div id="bioDevices"></div>
+    <div class="card" style="border-style:dashed">
+      <div style="font-size:12px;font-weight:600;color:#475569;margin-bottom:10px">Add Device</div>
+      <div class="row">
+        <input type="text" id="bioAddName" placeholder="Name (e.g. Main Entrance)">
+        <input type="text" id="bioAddHost" placeholder="IP (e.g. 192.168.1.201)" style="max-width:160px">
+        <input type="number" id="bioAddPort" placeholder="4370" style="max-width:70px">
+      </div>
+      <div class="actions" style="margin-top:10px">
+        <button class="primary" id="bioAddBtn">+ Add Device</button>
+      </div>
+    </div>
+
+    <!-- Staff sync -->
+    <div class="section">Staff Sync</div>
+    <div class="hint" style="margin-bottom:12px">
+      <b>How it works:</b> Click "Sync Staff" to push your team's names and PIN numbers from Dine to the device.
+      After syncing, each staff member must <b>walk to the K70 and enroll their fingerprint physically</b> — fingerprint data can never be uploaded remotely.
+    </div>
+    <div class="card">
+      <label for="bioSyncDevice">Target Device</label>
+      <select id="bioSyncDevice" style="width:100%;padding:9px 11px;border-radius:8px;border:1px solid #e2e8f0;font-size:13px;background:#fff;color:#1f2937"></select>
+      <div class="actions" style="margin-top:12px">
+        <button class="primary" id="bioSyncStaffBtn">Sync Staff to Device</button>
+        <button class="ghost" id="bioViewUsersBtn">View Enrolled Users</button>
+      </div>
+      <div class="status" id="bioSyncStatus" style="margin-top:8px"></div>
+      <div id="bioSyncResults" style="margin-top:8px"></div>
+    </div>
+
+    <div style="height:20px"></div>
   </div>
 
   <script src="renderer.js"></script>

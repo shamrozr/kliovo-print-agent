@@ -15,6 +15,8 @@ declare module "zkteco-js" {
     constructor(ip: string, port: number, timeout?: number, inport?: number);
     createSocket(): Promise<boolean>;
     getAttendances(): Promise<AttendanceResult>;
+    getSerialNumber(): Promise<string>;
+    setTime(t: Date): Promise<unknown>;
     disconnect(): Promise<boolean>;
   }
 

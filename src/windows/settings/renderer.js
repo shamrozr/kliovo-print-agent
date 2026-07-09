@@ -445,7 +445,9 @@ function selectTab(pane) {
   });
   document.getElementById("pane-print").classList.toggle("active", pane === "print");
   document.getElementById("pane-offline").classList.toggle("active", pane === "offline");
+  document.getElementById("pane-biometric").classList.toggle("active", pane === "biometric");
   if (pane === "offline") pollOffline();
+  if (pane === "biometric") { initBiometric(); pollBiometricStatus(); }
 }
 document.querySelectorAll(".tab").forEach(function(b) {
   b.addEventListener("click", function() { selectTab(b.dataset.pane); });
@@ -650,3 +652,300 @@ function pollOffline() {
   window.agent.getOfflineOverview().then(renderOffline).catch(function() {});
 }
 setInterval(function() { if (activePane === "offline") pollOffline(); }, 5000);
+
+// ── Biometric tab ───────────────────────────────────────────
+function getBioDevices() {
+  return (cfg.biometricDevices || []);
+}
+
+function bioDeviceEntry(idx) {
+  return getBioDevices()[idx];
+}
+
+function renderBioDevices() {
+  const list = document.getElementById("bioDevices");
+  while (list.firstChild) list.removeChild(list.firstChild);
+  const devices = getBioDevices();
+  if (devices.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.style.marginBottom = "10px";
+    empty.textContent = "No devices added yet.";
+    list.appendChild(empty);
+  }
+  devices.forEach(function(dev, i) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.style.marginBottom = "8px";
+
+    const header = document.createElement("div");
+    header.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px";
+    const dot = document.createElement("span");
+    dot.className = "dot yellow";
+    dot.id = "bioDevDot_" + i;
+    const nm = document.createElement("span");
+    nm.style.cssText = "font-weight:600;font-size:13px;flex:1";
+    nm.textContent = dev.name || "Unnamed";
+    const addr = document.createElement("span");
+    addr.style.cssText = "font-size:11px;color:#94a3b8;font-family:monospace";
+    addr.textContent = (dev.host || "?") + ":" + (dev.port || 4370);
+    header.append(dot, nm, addr);
+
+    const statusLine = document.createElement("div");
+    statusLine.className = "status";
+    statusLine.id = "bioDevSt_" + i;
+    statusLine.style.marginBottom = "8px";
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const testBtn = document.createElement("button");
+    testBtn.className = "ghost";
+    testBtn.textContent = "Test Connection";
+    testBtn.addEventListener("click", function() {
+      statusLine.className = "status";
+      statusLine.textContent = "Connecting…";
+      window.agent.biometricTestDevice({ host: dev.host, port: dev.port || 4370, label: dev.name }).then(function(r) {
+        if (r.ok) {
+          dot.className = "dot green";
+          if (r.serial) {
+            cfg.biometricDevices[i].serial = r.serial;
+            window.agent.saveConfig(cfg);
+          }
+          const regNote = r.registered
+            ? "  |  registered in Dine ✓"
+            : (r.registerError ? "  |  not registered: " + r.registerError : "");
+          statusLine.className = "status ok";
+          statusLine.textContent = "Connected ✓  Serial: " + r.serial + "  |  " + r.userCounts + " users  |  " + r.logCounts + " punch records" + regNote;
+        } else {
+          dot.className = "dot red";
+          statusLine.className = "status err";
+          statusLine.textContent = "Failed: " + (r.error || "unknown error");
+        }
+      }).catch(function(e) {
+        dot.className = "dot red";
+        statusLine.className = "status err";
+        statusLine.textContent = e.message;
+      });
+    });
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.className = dev.enabled ? "ghost" : "primary";
+    toggleBtn.textContent = dev.enabled ? "Disable" : "Enable";
+    toggleBtn.addEventListener("click", function() {
+      cfg.biometricDevices[i].enabled = !cfg.biometricDevices[i].enabled;
+      window.agent.saveConfig(cfg).then(function() { renderBioDevices(); updateBioDeviceSelect(); });
+    });
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "danger";
+    removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", function() {
+      if (!confirm("Remove " + (dev.name || "this device") + "?")) return;
+      cfg.biometricDevices.splice(i, 1);
+      window.agent.saveConfig(cfg).then(function() { renderBioDevices(); updateBioDeviceSelect(); });
+    });
+
+    actions.append(testBtn, toggleBtn, removeBtn);
+    card.append(header, statusLine, actions);
+    list.appendChild(card);
+  });
+  updateBioDeviceSelect();
+}
+
+function updateBioDeviceSelect() {
+  const sel = document.getElementById("bioSyncDevice");
+  while (sel.firstChild) sel.removeChild(sel.firstChild);
+  const devices = getBioDevices();
+  if (devices.length === 0) {
+    const o = document.createElement("option");
+    o.textContent = "No devices configured";
+    o.disabled = true;
+    sel.appendChild(o);
+    return;
+  }
+  devices.forEach(function(dev, i) {
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent = (dev.name || "Device " + i) + "  —  " + (dev.host || "?") + ":" + (dev.port || 4370);
+    sel.appendChild(o);
+  });
+}
+
+function initBiometric() {
+  document.getElementById("bioKey").value = cfg.attendanceDeviceKey || "";
+  renderBioDevices();
+}
+
+function pollBiometricStatus() {
+  if (activePane !== "biometric") return;
+  window.agent.biometricStatus().then(function(s) {
+    if (!s || !s.ok) return;
+    document.getElementById("bioQueueN").textContent = String(s.queueDepth || 0);
+    document.getElementById("bioSyncN").textContent = s.lastSync
+      ? new Date(s.lastSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+      : "never";
+
+    const statusEl = document.getElementById("bioDeviceStatuses");
+    while (statusEl.firstChild) statusEl.removeChild(statusEl.firstChild);
+    (s.devices || []).forEach(function(d) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-top:1px solid #f1f5f9";
+      const dot = document.createElement("span");
+      dot.className = "dot " + (d.connected ? "green" : "red");
+      const lbl = document.createElement("span");
+      lbl.textContent = d.name;
+      const st = document.createElement("span");
+      st.style.cssText = "margin-left:auto;font-size:11px;color:#94a3b8";
+      st.textContent = d.connected ? "polling" : "disconnected";
+      row.append(dot, lbl, st);
+      statusEl.appendChild(row);
+    });
+  }).catch(function() {});
+}
+setInterval(function() { if (activePane === "biometric") pollBiometricStatus(); }, 5000);
+
+// Save attendance device key
+document.getElementById("bioSaveConfigBtn").addEventListener("click", function() {
+  const st = document.getElementById("bioConfigStatus");
+  const key = document.getElementById("bioKey").value.trim();
+  if (key && !key.startsWith("atk_")) {
+    st.className = "status err";
+    st.textContent = "That doesn't look like an attendance device key (should start with atk_).";
+    return;
+  }
+  cfg.attendanceDeviceKey = key;
+  st.className = "status";
+  st.textContent = "Saving…";
+  window.agent.saveConfig(cfg).then(function() {
+    st.className = "status ok";
+    st.textContent = "Saved ✓ — now test each device's connection below to register it.";
+    setTimeout(function() { st.textContent = ""; }, 4000);
+  }).catch(function(e) {
+    st.className = "status err";
+    st.textContent = e.message;
+  });
+});
+
+// Add device
+document.getElementById("bioAddBtn").addEventListener("click", function() {
+  const name = document.getElementById("bioAddName").value.trim();
+  const host = document.getElementById("bioAddHost").value.trim();
+  const port = parseInt(document.getElementById("bioAddPort").value) || 4370;
+  if (!host) { alert("Enter the device IP address."); return; }
+  const id = "zk_" + Date.now();
+  if (!cfg.biometricDevices) cfg.biometricDevices = [];
+  cfg.biometricDevices.push({ id, name: name || host, type: "zk-tcp", host, port, enabled: true, pollIntervalMs: 15000 });
+  document.getElementById("bioAddName").value = "";
+  document.getElementById("bioAddHost").value = "";
+  document.getElementById("bioAddPort").value = "";
+  window.agent.saveConfig(cfg).then(function() { renderBioDevices(); });
+});
+
+// Sync staff from Dine to device
+document.getElementById("bioSyncStaffBtn").addEventListener("click", function() {
+  const st = document.getElementById("bioSyncStatus");
+  const results = document.getElementById("bioSyncResults");
+  const sel = document.getElementById("bioSyncDevice");
+  const idx = parseInt(sel.value);
+  const dev = bioDeviceEntry(idx);
+  if (!dev) { st.className = "status err"; st.textContent = "Select a device first."; return; }
+  st.className = "status";
+  st.textContent = "Fetching staff from Dine…";
+  while (results.firstChild) results.removeChild(results.firstChild);
+
+  window.agent.biometricSyncStaff({ host: dev.host, port: dev.port || 4370, serial: dev.serial }).then(function(r) {
+    if (!r.ok && (!r.results || r.results.length === 0)) {
+      st.className = "status err";
+      st.textContent = r.error || "Failed";
+      return;
+    }
+    const removedNote = r.removed > 0 ? "  ·  " + r.removed + " ex-staff removed from device" : "";
+    st.className = r.ok ? "status ok" : "status err";
+    st.textContent = r.ok
+      ? "Done — " + r.pushed + " staff pushed to device ✓" + (r.failed > 0 ? "  (" + r.failed + " failed)" : "") + removedNote
+      : (r.error || "Partial failure");
+
+    if (r.results && r.results.length > 0) {
+      const tbl = document.createElement("table");
+      tbl.className = "tbl";
+      const thead = document.createElement("thead");
+      const htr = document.createElement("tr");
+      ["Name", "PIN", "Status"].forEach(function(h) {
+        const th = document.createElement("th"); th.textContent = h; htr.appendChild(th);
+      });
+      thead.appendChild(htr);
+      tbl.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      r.results.forEach(function(row) {
+        const tr = document.createElement("tr");
+        const tdN = document.createElement("td"); tdN.textContent = row.name;
+        const tdP = document.createElement("td"); tdP.appendChild(pill(row.pin, "pin"));
+        const tdS = document.createElement("td");
+        tdS.appendChild(row.ok ? pill("synced", "onl") : pill(row.error || "failed", "off"));
+        tr.append(tdN, tdP, tdS);
+        tbody.appendChild(tr);
+      });
+      tbl.appendChild(tbody);
+      results.appendChild(tbl);
+    }
+  }).catch(function(e) {
+    st.className = "status err";
+    st.textContent = e.message;
+  });
+});
+
+// View enrolled users on device
+document.getElementById("bioViewUsersBtn").addEventListener("click", function() {
+  const st = document.getElementById("bioSyncStatus");
+  const results = document.getElementById("bioSyncResults");
+  const sel = document.getElementById("bioSyncDevice");
+  const idx = parseInt(sel.value);
+  const dev = bioDeviceEntry(idx);
+  if (!dev) { st.className = "status err"; st.textContent = "Select a device first."; return; }
+  st.className = "status";
+  st.textContent = "Reading device…";
+  while (results.firstChild) results.removeChild(results.firstChild);
+
+  window.agent.biometricDeviceUsers({ host: dev.host, port: dev.port || 4370 }).then(function(r) {
+    if (!r.ok) {
+      st.className = "status err";
+      st.textContent = r.error || "Failed";
+      return;
+    }
+    st.className = "status ok";
+    st.textContent = r.users.length + " user(s) enrolled on device";
+    if (r.users.length === 0) {
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.style.marginTop = "8px";
+      e.textContent = "No users enrolled. Sync staff first, then each person enrolls their fingerprint at the device.";
+      results.appendChild(e);
+      return;
+    }
+    const tbl = document.createElement("table");
+    tbl.className = "tbl";
+    const thead = document.createElement("thead");
+    const htr = document.createElement("tr");
+    ["Name", "PIN (userId)", "Role"].forEach(function(h) {
+      const th = document.createElement("th"); th.textContent = h; htr.appendChild(th);
+    });
+    thead.appendChild(htr);
+    tbl.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    r.users.forEach(function(u) {
+      const tr = document.createElement("tr");
+      const tdN = document.createElement("td"); tdN.textContent = u.name || "(no name)";
+      const tdP = document.createElement("td"); tdP.appendChild(pill(u.userId, "pin"));
+      const tdR = document.createElement("td");
+      tdR.appendChild(pill(u.role === 14 ? "admin" : "user", u.role === 14 ? "role" : ""));
+      tr.append(tdN, tdP, tdR);
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    results.appendChild(tbl);
+  }).catch(function(e) {
+    st.className = "status err";
+    st.textContent = e.message;
+  });
+});

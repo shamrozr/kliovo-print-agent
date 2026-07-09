@@ -103,6 +103,193 @@ ipcMain.handle("biometric:status", () => {
   }
 });
 
+ipcMain.handle("biometric:test-device", async (_, entry: { host: string; port: number; label?: string }) => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const ZKLib = require("zkteco-js") as new (h: string, p: number, t1: number, t2: number) => {
+    createSocket(): Promise<void>;
+    getInfo(): Promise<{ userCounts: number; logCounts: number; logCapacity: number }>;
+    getSerialNumber(): Promise<string>;
+    getDeviceName(): Promise<string>;
+    disconnect(): Promise<void>;
+  };
+  const zk = new ZKLib(entry.host ?? "192.168.1.201", entry.port ?? 4370, 5000, 4000);
+  try {
+    await zk.createSocket();
+    const [info, serial, name] = await Promise.all([
+      zk.getInfo(),
+      zk.getSerialNumber().catch(() => ""),
+      zk.getDeviceName().catch(() => "K70"),
+    ]);
+    await zk.disconnect().catch(() => {});
+
+    // Register/refresh this device in Dine so it shows up under Settings →
+    // HR → Attendance, and so device-staff/device-ingest can scope PINs to
+    // exactly this physical machine. Registration failure (e.g. no key saved
+    // yet) never fails the connection test itself.
+    let registered = false;
+    let registerError: string | undefined;
+    if (serial) {
+      const config = loadConfig();
+      if (config.attendanceDeviceKey) {
+        try {
+          const resp = await fetch(`${config.serverUrl}/api/attendance/devices/register`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${config.attendanceDeviceKey}`,
+            },
+            body: JSON.stringify({ serialNumber: serial, label: entry.label || name, deviceType: "zkteco_k70" }),
+            signal: AbortSignal.timeout(10_000),
+          });
+          registered = resp.ok;
+          if (!resp.ok) registerError = `Server returned ${resp.status}`;
+        } catch (e) {
+          registerError = (e as Error).message;
+        }
+      } else {
+        registerError = "No attendance device key saved yet — save one in Settings first, then test again.";
+      }
+    }
+
+    return {
+      ok: true,
+      serial,
+      name,
+      userCounts: info.userCounts,
+      logCounts: info.logCounts,
+      registered,
+      registerError,
+    };
+  } catch (e) {
+    await zk.disconnect().catch(() => {});
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle("biometric:device-users", async (_, entry: { host: string; port: number }) => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const ZKLib = require("zkteco-js") as new (h: string, p: number, t1: number, t2: number) => {
+    createSocket(): Promise<void>;
+    getUsers(): Promise<{ data: Array<{ uid: number; userId: string; name: string; role: number }> }>;
+    disconnect(): Promise<void>;
+  };
+  const zk = new ZKLib(entry.host ?? "192.168.1.201", entry.port ?? 4370, 5000, 4000);
+  try {
+    await zk.createSocket();
+    const users = await zk.getUsers();
+    await zk.disconnect().catch(() => {});
+    return { ok: true, users: users.data ?? [] };
+  } catch (e) {
+    await zk.disconnect().catch(() => {});
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle("biometric:sync-staff", async (_, entry: { host: string; port: number; serial?: string }) => {
+  const config = loadConfig();
+  const { serverUrl, attendanceDeviceKey } = config;
+  if (!attendanceDeviceKey) {
+    return { ok: false, error: "Save the attendance device key first (Dine → Settings → HR → Attendance)." };
+  }
+
+  // A device must be registered (serial known) before we can scope its PIN
+  // list — that happens automatically the first time "Test Connection"
+  // succeeds. If we don't have a serial yet, resolve it now.
+  let serial = entry.serial;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const ZKLib = require("zkteco-js") as new (h: string, p: number, t1: number, t2: number) => {
+    createSocket(): Promise<void>;
+    getSerialNumber(): Promise<string>;
+    getUsers(): Promise<{ data: Array<{ uid: number; userId: string; name: string; role: number }> }>;
+    setUser(uid: number, userId: string, name: string, password: string, role: number, cardno: number): Promise<void>;
+    deleteUser(uid: number): Promise<void>;
+    disconnect(): Promise<void>;
+  };
+
+  if (!serial) {
+    const probe = new ZKLib(entry.host ?? "192.168.1.201", entry.port ?? 4370, 5000, 4000);
+    try {
+      await probe.createSocket();
+      serial = await probe.getSerialNumber();
+    } catch (e) {
+      return { ok: false, error: `Couldn't read the device's serial number: ${(e as Error).message}` };
+    } finally {
+      await probe.disconnect().catch(() => {});
+    }
+  }
+  if (!serial) {
+    return { ok: false, error: "Device serial number unavailable — test the connection first." };
+  }
+
+  // 1. Fetch the staff+PIN list scoped to THIS device (auto-assigns fresh
+  //    PINs server-side for anyone who doesn't have one on this device yet).
+  let staff: Array<{ staffId: string; name: string; pin: string; uid: number }> = [];
+  try {
+    const resp = await fetch(
+      `${serverUrl}/api/attendance/device-staff?deviceSerial=${encodeURIComponent(serial)}`,
+      { headers: { Authorization: `Bearer ${attendanceDeviceKey}` }, signal: AbortSignal.timeout(10_000) }
+    );
+    if (!resp.ok) return { ok: false, error: `Server returned ${resp.status}: ${await resp.text().catch(() => "")}` };
+    const data = (await resp.json()) as { staff: typeof staff };
+    staff = data.staff ?? [];
+  } catch (e) {
+    return { ok: false, error: `Dine fetch failed: ${(e as Error).message}` };
+  }
+  if (staff.length === 0) {
+    return { ok: false, error: "No active staff found for this branch." };
+  }
+
+  // 2. Push each staff member to the ZK device, then reconcile: remove any
+  //    device-enrolled PIN that's no longer an active staff member (e.g. an
+  //    ex-employee) so their fingerprint can never punch again and a future
+  //    hire can never inherit their still-enrolled template.
+  const zk = new ZKLib(entry.host ?? "192.168.1.201", entry.port ?? 4370, 5000, 4000);
+  const results: Array<{ name: string; pin: string; ok: boolean; error?: string }> = [];
+  const removed: Array<{ pin: string; ok: boolean; error?: string }> = [];
+  try {
+    await zk.createSocket();
+
+    const expectedUids = new Set(staff.map((s) => s.uid));
+    for (const s of staff) {
+      try {
+        await zk.setUser(s.uid, s.pin, s.name, "", 0, 0);
+        results.push({ name: s.name, pin: s.pin, ok: true });
+      } catch (e) {
+        results.push({ name: s.name, pin: s.pin, ok: false, error: (e as Error).message });
+      }
+    }
+
+    try {
+      const enrolled = await zk.getUsers();
+      for (const u of enrolled.data ?? []) {
+        if (!expectedUids.has(u.uid)) {
+          try {
+            await zk.deleteUser(u.uid);
+            removed.push({ pin: String(u.uid), ok: true });
+          } catch (e) {
+            removed.push({ pin: String(u.uid), ok: false, error: (e as Error).message });
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn("[biometric] reconciliation read-back failed:", (e as Error).message);
+    }
+
+    await zk.disconnect().catch(() => {});
+  } catch (e) {
+    await zk.disconnect().catch(() => {});
+    return { ok: false, error: `Device connection failed: ${(e as Error).message}`, results };
+  }
+  return {
+    ok: true,
+    pushed: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    removed: removed.filter((r) => r.ok).length,
+    removedFailed: removed.filter((r) => !r.ok).length,
+    results,
+  };
+});
+
 ipcMain.handle("printer:test", async (_, idx: number) => {
   const config  = loadConfig();
   const printer = config.printers[idx];

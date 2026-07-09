@@ -53,10 +53,15 @@ export interface AgentConfig {
 
   /** Biometric attendance devices (ZKTeco TCP, ADMS HTTP, etc.). */
   biometricDevices: BiometricDeviceEntry[];
-  /** Shared secret for authenticating punch pushes to the Dine server. */
-  attendanceDeviceSecret?: string;
-  /** Tenant slug used when pushing punches (identifies the restaurant). */
-  attendanceTenantSlug?: string;
+  /**
+   * Per-branch "Attendance device key" (atk_…), pasted by an admin from Dine →
+   * Settings → HR → Attendance. The ONLY credential that lets this agent push
+   * biometric punches / pull device-scoped staff PINs for the branch. The
+   * server resolves the tenant FROM this key (like offlineDeviceKey above) —
+   * no separate tenant slug is needed, and one leaked key only ever exposes
+   * one branch instead of every tenant on the platform.
+   */
+  attendanceDeviceKey?: string;
 }
 
 const CONFIG_DIR  = app.getPath("userData");
