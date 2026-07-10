@@ -32,6 +32,31 @@ export function initAttendanceStore(): void {
   conn.pragma("busy_timeout = 5000");
   conn.prepare(CREATE_TABLE_SQL).run();
 
+  // Identity dedup: (deviceUserId, timestamp, deviceId) uniquely identifies a
+  // physical punch. With this in place the poller can queue the device's whole
+  // recent log every cycle and INSERT OR IGNORE silently drops anything already
+  // captured — so a new punch is ALWAYS queued, and we never depend on a
+  // fragile local high-water cursor that a single bad-dated record can wedge.
+  // Existing installs may already hold duplicate rows from the old logic, which
+  // would make the UNIQUE index creation fail — collapse them first.
+  try {
+    conn
+      .prepare(
+        `DELETE FROM punches WHERE rowid NOT IN (
+           SELECT MIN(rowid) FROM punches GROUP BY deviceUserId, timestamp, deviceId
+         )`
+      )
+      .run();
+    conn
+      .prepare(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_punch_identity
+           ON punches(deviceUserId, timestamp, deviceId)`
+      )
+      .run();
+  } catch (e) {
+    logger.warn("[biometric] could not create punch-identity index:", e);
+  }
+
   db = conn;
   logger.info("[biometric] attendance store ready:", DB_PATH);
 }
@@ -41,19 +66,26 @@ function getDb(): Database.Database {
   return db;
 }
 
+/**
+ * Queue a punch. INSERT OR IGNORE against the (deviceUserId, timestamp,
+ * deviceId) identity index — re-reading the device's log and re-queuing a punch
+ * we already have is a silent no-op. Returns true only when a genuinely new row
+ * was inserted, so callers can count how many fresh punches this poll found.
+ */
 export function queuePunch(punch: {
   deviceUserId: string;
   timestamp: string;
   direction?: string;
   deviceId: string;
-}): void {
+}): boolean {
   const id = crypto.randomUUID();
-  getDb()
+  const info = getDb()
     .prepare(
-      `INSERT INTO punches (id, deviceUserId, timestamp, direction, deviceId)
+      `INSERT OR IGNORE INTO punches (id, deviceUserId, timestamp, direction, deviceId)
        VALUES (?, ?, ?, ?, ?)`
     )
     .run(id, punch.deviceUserId, punch.timestamp, punch.direction ?? null, punch.deviceId);
+  return info.changes > 0;
 }
 
 export function getUnsyncedPunches(limit = 50): PunchQueueItem[] {

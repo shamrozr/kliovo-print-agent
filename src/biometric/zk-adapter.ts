@@ -1,57 +1,7 @@
-import fs from "fs";
-import path from "path";
-import { app } from "electron";
 import { logger } from "../logger";
 import { queuePunch } from "./attendance-store";
 import { connectZk, zkErrorMessage, resolveDeviceId, sanitizeSerial, type ZkClient } from "./zk-connect";
 import type { BiometricDeviceEntry, DevicePunch } from "./types";
-
-const STATE_PATH = path.join(app.getPath("userData"), "zk-state.json");
-
-/**
- * Per-device sync cursor. A TIMESTAMP high-water mark, NOT a record count.
- * ──────────────────────────────────────────────────────────────────────────
- * A count cursor (`lastCount` + `logs.slice(lastCount)`) silently stops
- * pushing forever the moment the device's stored count stops strictly
- * exceeding the last-seen count — which happens on every agent restart (count
- * unchanged), whenever the terminal's log is cleared/rotates (count drops),
- * or if a firmware returns logs in a different order. We instead remember the
- * newest timestamp we've already pushed, plus the identities of the punches AT
- * that exact second (so two people punching in the same second are never
- * conflated), and push anything at/after it that we haven't sent. The Dine
- * ingest endpoint dedups by (device serial, timestamp) against its own
- * watermark, so even a full resend is idempotent — this cursor only exists to
- * keep the wire small, never as the correctness boundary.
- */
-interface DeviceCursor {
-  lastTs: string | null;
-  idsAtLastTs: string[];
-  // legacy field tolerated on read; no longer written
-  lastCount?: number;
-}
-
-interface ZkState {
-  [deviceId: string]: DeviceCursor;
-}
-
-function loadState(): ZkState {
-  try {
-    if (fs.existsSync(STATE_PATH)) {
-      return JSON.parse(fs.readFileSync(STATE_PATH, "utf-8"));
-    }
-  } catch {
-    // corrupt state — start fresh
-  }
-  return {};
-}
-
-function saveState(state: ZkState): void {
-  try {
-    fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2), "utf-8");
-  } catch (e) {
-    logger.warn("[zk] failed to save state:", e);
-  }
-}
 
 interface RawLog {
   deviceUserId?: string | number;
@@ -60,49 +10,31 @@ interface RawLog {
 }
 
 /**
- * Given the full punch log read off a device and the persisted cursor for it,
- * return only the punches we haven't pushed yet and the cursor to persist
- * afterwards. Punches with an unparseable timestamp are dropped here (the
- * server would reject them as invalid anyway) so they can't wedge the cursor.
+ * Normalize a device's raw attendance log into wire-ready punches with a
+ * canonical ISO timestamp.
+ * ──────────────────────────────────────────────────────────────────────────
+ * NO cursor, NO high-water mark, NO filtering: EVERY record the device returns
+ * is emitted on EVERY poll. Deduplication happens twice downstream and both
+ * layers are content-addressed, not position/time based:
+ *   1. the local store's UNIQUE (deviceUserId, timestamp, deviceId) index
+ *      (INSERT OR IGNORE) — a punch already queued is silently skipped;
+ *   2. the Dine ingest watermark + clock-engine conflict check.
+ * This deliberately replaces the old timestamp cursor, which a single
+ * future-dated record (a K70 clock glitch) could pin ahead of every real punch
+ * — wedging sync so new punches read as "already seen" forever. Re-sending the
+ * whole log every 15s is a few KB; correctness no longer depends on any local
+ * state that can drift or get poisoned. Unparseable timestamps are forwarded
+ * as-is (the server decides), never dropped.
  */
-function selectNewPunches(
-  cursor: DeviceCursor | undefined,
-  logs: RawLog[]
-): { punches: DevicePunch[]; nextCursor: DeviceCursor } {
-  const lastTsMs = cursor?.lastTs ? new Date(cursor.lastTs).getTime() : null;
-  const seenAtLastTs = new Set(cursor?.idsAtLastTs ?? []);
-
-  const parsed = logs
-    .map((entry) => {
-      const deviceUserId = String(entry.deviceUserId ?? entry.id ?? "unknown");
-      const tsRaw = entry.timestamp ?? "";
-      const ms = new Date(tsRaw).getTime();
-      if (Number.isNaN(ms)) return null;
-      return { deviceUserId, timestamp: tsRaw, ms, identity: `${deviceUserId}@${ms}` };
-    })
-    .filter((x): x is NonNullable<typeof x> => x !== null);
-
-  const fresh = parsed.filter((p) => {
-    if (lastTsMs === null) return true; // first sync — take everything (server dedups)
-    if (p.ms > lastTsMs) return true;
-    if (p.ms === lastTsMs) return !seenAtLastTs.has(p.identity); // same-second, not yet sent
-    return false;
-  });
-
-  // Next cursor = newest timestamp present on the device + the identities of
-  // every punch at that exact second. Recomputed from the full log each time
-  // so same-second punches accumulate correctly.
-  let nextCursor: DeviceCursor = cursor ?? { lastTs: null, idsAtLastTs: [] };
-  if (parsed.length > 0) {
-    const maxMs = Math.max(...parsed.map((p) => p.ms));
-    const idsAtMax = parsed.filter((p) => p.ms === maxMs).map((p) => p.identity);
-    nextCursor = { lastTs: new Date(maxMs).toISOString(), idsAtLastTs: idsAtMax };
+function normalizePunchLogs(logs: RawLog[]): DevicePunch[] {
+  const out: DevicePunch[] = [];
+  for (const entry of logs) {
+    if (entry.timestamp == null) continue;
+    const d = new Date(entry.timestamp);
+    const timestamp = Number.isNaN(d.getTime()) ? String(entry.timestamp) : d.toISOString();
+    out.push({ deviceUserId: String(entry.deviceUserId ?? entry.id ?? "unknown"), timestamp });
   }
-
-  return {
-    punches: fresh.map((p) => ({ deviceUserId: p.deviceUserId, timestamp: p.timestamp })),
-    nextCursor,
-  };
+  return out;
 }
 
 /** Persist the resolved hardware serial onto this device's config entry, once. */
@@ -135,7 +67,9 @@ export function getLastScanAt(): string | null {
 
 export async function startZkPolling(
   device: BiometricDeviceEntry,
-  onPunch: (punch: DevicePunch, deviceSerial: string) => void
+  // Returns true when the punch was newly stored (false = already had it), so
+  // the poller can count genuinely-fresh punches for its log line.
+  onPunch: (punch: DevicePunch, deviceSerial: string) => boolean
 ): Promise<ZkPoller> {
   const host = device.host ?? "192.168.1.201";
   const port = device.port ?? 4370;
@@ -188,18 +122,14 @@ export async function startZkPolling(
       const logs = Array.isArray(attendances?.data) ? attendances.data : [];
       lastScanAt = new Date().toISOString(); // heartbeat: we reached the device
 
-      const state = loadState();
-      const { punches, nextCursor } = selectNewPunches(state[device.id], logs);
       const effectiveSerial = serial ?? device.id;
-
-      if (punches.length > 0) {
-        for (const punch of punches) onPunch(punch, effectiveSerial);
-        logger.info(`[zk] ${device.name}: ${punches.length} new punch(es) queued (device log: ${logs.length})`);
+      let queued = 0;
+      for (const punch of normalizePunchLogs(logs)) {
+        if (onPunch(punch, effectiveSerial)) queued++; // true = newly stored (not a dupe)
       }
-      // Persist the advanced cursor even when nothing was new, so a legacy
-      // count-based state is migrated to the timestamp cursor on first poll.
-      state[device.id] = nextCursor;
-      saveState(state);
+      if (queued > 0) {
+        logger.info(`[zk] ${device.name}: ${queued} new punch(es) queued (device log: ${logs.length})`);
+      }
 
       // Reset backoff on success
       backoffMs = interval;
@@ -234,11 +164,11 @@ export async function startZkPolling(
 
 /**
  * One-shot, on-demand poll of a single device — backs the "Pull Attendance Now"
- * button in Settings. Reuses the SAME `zk-state.json` lastCount cursor as the
- * background poller, so a manual pull never double-queues punches the loop has
- * already sent. Returns a detailed, human-readable result so the operator can
- * see exactly what happened (connected? how many logs on device? how many new?)
- * instead of waiting on the silent 15s loop.
+ * button in Settings. Queues the device's whole log; the store's identity index
+ * drops anything already captured, so `newPunches` is the count of genuinely
+ * fresh records. Returns a human-readable result so the operator sees exactly
+ * what happened (connected? how many logs on device? how many new?) instead of
+ * waiting on the silent 15s loop.
  */
 export async function pollDeviceOnce(device: BiometricDeviceEntry): Promise<{
   ok: boolean;
@@ -271,16 +201,13 @@ export async function pollDeviceOnce(device: BiometricDeviceEntry): Promise<{
     const logs = Array.isArray(attendances?.data) ? attendances.data : [];
     lastScanAt = new Date().toISOString(); // heartbeat: we reached the device
 
-    const state = loadState();
-    const { punches, nextCursor } = selectNewPunches(state[device.id], logs);
-    for (const punch of punches) {
-      queuePunch({ deviceUserId: punch.deviceUserId, timestamp: punch.timestamp, deviceId: effectiveSerial });
+    let queued = 0;
+    for (const punch of normalizePunchLogs(logs)) {
+      if (queuePunch({ deviceUserId: punch.deviceUserId, timestamp: punch.timestamp, deviceId: effectiveSerial })) queued++;
     }
-    state[device.id] = nextCursor;
-    saveState(state);
-    logger.info(`[zk] ${device.name}: manual pull queued ${punches.length} new punch(es) (device log: ${logs.length})`);
+    logger.info(`[zk] ${device.name}: manual pull queued ${queued} new punch(es) (device log: ${logs.length})`);
 
-    return { ok: true, deviceSerial: effectiveSerial, totalLogs: logs.length, newPunches: punches.length };
+    return { ok: true, deviceSerial: effectiveSerial, totalLogs: logs.length, newPunches: queued };
   } catch (e) {
     const msg = zkErrorMessage(e);
     logger.warn(`[zk] ${device.name}: manual pull failed:`, msg);
@@ -303,7 +230,7 @@ export function startAllBiometricDevices(): void {
 
   for (const device of zkDevices) {
     void startZkPolling(device, (punch, deviceSerial) => {
-      queuePunch({
+      return queuePunch({
         deviceUserId: punch.deviceUserId,
         timestamp: punch.timestamp,
         direction: punch.direction,
