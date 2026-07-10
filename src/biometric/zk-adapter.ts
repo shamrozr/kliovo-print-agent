@@ -1,9 +1,9 @@
-import ZKLib from "zkteco-js";
 import fs from "fs";
 import path from "path";
 import { app } from "electron";
 import { logger } from "../logger";
 import { queuePunch } from "./attendance-store";
+import { connectZk, zkErrorMessage, type ZkClient } from "./zk-connect";
 import type { BiometricDeviceEntry, DevicePunch } from "./types";
 
 const STATE_PATH = path.join(app.getPath("userData"), "zk-state.json");
@@ -67,10 +67,9 @@ export async function startZkPolling(
   async function poll(): Promise<void> {
     if (stopped) return;
 
-    let zk: ZKLib | null = null;
+    let zk: ZkClient | null = null;
     try {
-      zk = new ZKLib(host, port, 5_000, 4_000);
-      await zk.createSocket();
+      zk = await connectZk(host, port);
 
       // Resolve + cache the real hardware serial once. This — not the agent's
       // local config id — is what identifies the terminal to Dine, since two
@@ -84,7 +83,7 @@ export async function startZkPolling(
             cacheDeviceSerial(device.id, serial);
           }
         } catch (e) {
-          logger.warn(`[zk] ${device.name}: couldn't read serial number:`, (e as Error).message);
+          logger.warn(`[zk] ${device.name}: couldn't read serial number:`, zkErrorMessage(e));
         }
       }
 
@@ -94,7 +93,7 @@ export async function startZkPolling(
       try {
         await zk.setTime(new Date());
       } catch (e) {
-        logger.warn(`[zk] ${device.name}: clock sync failed:`, (e as Error).message);
+        logger.warn(`[zk] ${device.name}: clock sync failed:`, zkErrorMessage(e));
       }
 
       const attendances = await zk.getAttendances();
@@ -121,7 +120,7 @@ export async function startZkPolling(
       // Reset backoff on success
       backoffMs = interval;
     } catch (e) {
-      logger.warn(`[zk] ${device.name} poll failed:`, (e as Error).message);
+      logger.warn(`[zk] ${device.name} poll failed:`, zkErrorMessage(e));
       backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF);
     } finally {
       if (zk) {

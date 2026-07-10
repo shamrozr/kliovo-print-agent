@@ -17,6 +17,7 @@ import { startAttendanceSync } from "./biometric/attendance-sync";
 import { startAllBiometricDevices, stopAllBiometricDevices, getDeviceStatuses } from "./biometric/zk-adapter";
 import { getQueueDepth } from "./biometric/attendance-store";
 import { getLastSyncAt } from "./biometric/attendance-sync";
+import { connectZk, zkErrorMessage } from "./biometric/zk-connect";
 import { logger } from "./logger";
 
 let settingsWin: BrowserWindow | null = null;
@@ -104,17 +105,9 @@ ipcMain.handle("biometric:status", () => {
 });
 
 ipcMain.handle("biometric:test-device", async (_, entry: { host: string; port: number; label?: string }) => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const ZKLib = require("zkteco-js") as new (h: string, p: number, t1: number, t2: number) => {
-    createSocket(): Promise<void>;
-    getInfo(): Promise<{ userCounts: number; logCounts: number; logCapacity: number }>;
-    getSerialNumber(): Promise<string>;
-    getDeviceName(): Promise<string>;
-    disconnect(): Promise<void>;
-  };
-  const zk = new ZKLib(entry.host ?? "192.168.1.201", entry.port ?? 4370, 5000, 4000);
+  let zk: Awaited<ReturnType<typeof connectZk>> | undefined;
   try {
-    await zk.createSocket();
+    zk = await connectZk(entry.host, entry.port);
     const [info, serial, name] = await Promise.all([
       zk.getInfo(),
       zk.getSerialNumber().catch(() => ""),
@@ -161,27 +154,25 @@ ipcMain.handle("biometric:test-device", async (_, entry: { host: string; port: n
       registerError,
     };
   } catch (e) {
-    await zk.disconnect().catch(() => {});
-    return { ok: false, error: (e as Error).message };
+    await zk?.disconnect().catch(() => {});
+    const msg = zkErrorMessage(e);
+    logger.warn(`[biometric] test-device ${entry.host}:${entry.port} failed:`, msg);
+    return { ok: false, error: msg };
   }
 });
 
 ipcMain.handle("biometric:device-users", async (_, entry: { host: string; port: number }) => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const ZKLib = require("zkteco-js") as new (h: string, p: number, t1: number, t2: number) => {
-    createSocket(): Promise<void>;
-    getUsers(): Promise<{ data: Array<{ uid: number; userId: string; name: string; role: number }> }>;
-    disconnect(): Promise<void>;
-  };
-  const zk = new ZKLib(entry.host ?? "192.168.1.201", entry.port ?? 4370, 5000, 4000);
+  let zk: Awaited<ReturnType<typeof connectZk>> | undefined;
   try {
-    await zk.createSocket();
+    zk = await connectZk(entry.host, entry.port);
     const users = await zk.getUsers();
     await zk.disconnect().catch(() => {});
     return { ok: true, users: users.data ?? [] };
   } catch (e) {
-    await zk.disconnect().catch(() => {});
-    return { ok: false, error: (e as Error).message };
+    await zk?.disconnect().catch(() => {});
+    const msg = zkErrorMessage(e);
+    logger.warn(`[biometric] device-users ${entry.host}:${entry.port} failed:`, msg);
+    return { ok: false, error: msg };
   }
 });
 
@@ -196,25 +187,16 @@ ipcMain.handle("biometric:sync-staff", async (_, entry: { host: string; port: nu
   // list — that happens automatically the first time "Test Connection"
   // succeeds. If we don't have a serial yet, resolve it now.
   let serial = entry.serial;
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const ZKLib = require("zkteco-js") as new (h: string, p: number, t1: number, t2: number) => {
-    createSocket(): Promise<void>;
-    getSerialNumber(): Promise<string>;
-    getUsers(): Promise<{ data: Array<{ uid: number; userId: string; name: string; role: number }> }>;
-    setUser(uid: number, userId: string, name: string, password: string, role: number, cardno: number): Promise<void>;
-    deleteUser(uid: number): Promise<void>;
-    disconnect(): Promise<void>;
-  };
 
   if (!serial) {
-    const probe = new ZKLib(entry.host ?? "192.168.1.201", entry.port ?? 4370, 5000, 4000);
+    let probe: Awaited<ReturnType<typeof connectZk>> | undefined;
     try {
-      await probe.createSocket();
+      probe = await connectZk(entry.host, entry.port);
       serial = await probe.getSerialNumber();
     } catch (e) {
-      return { ok: false, error: `Couldn't read the device's serial number: ${(e as Error).message}` };
+      return { ok: false, error: `Couldn't read the device's serial number: ${zkErrorMessage(e)}` };
     } finally {
-      await probe.disconnect().catch(() => {});
+      await probe?.disconnect().catch(() => {});
     }
   }
   if (!serial) {
@@ -243,11 +225,11 @@ ipcMain.handle("biometric:sync-staff", async (_, entry: { host: string; port: nu
   //    device-enrolled PIN that's no longer an active staff member (e.g. an
   //    ex-employee) so their fingerprint can never punch again and a future
   //    hire can never inherit their still-enrolled template.
-  const zk = new ZKLib(entry.host ?? "192.168.1.201", entry.port ?? 4370, 5000, 4000);
+  let zk: Awaited<ReturnType<typeof connectZk>> | undefined;
   const results: Array<{ name: string; pin: string; ok: boolean; error?: string }> = [];
   const removed: Array<{ pin: string; ok: boolean; error?: string }> = [];
   try {
-    await zk.createSocket();
+    zk = await connectZk(entry.host, entry.port);
 
     const expectedUids = new Set(staff.map((s) => s.uid));
     for (const s of staff) {
@@ -255,7 +237,7 @@ ipcMain.handle("biometric:sync-staff", async (_, entry: { host: string; port: nu
         await zk.setUser(s.uid, s.pin, s.name, "", 0, 0);
         results.push({ name: s.name, pin: s.pin, ok: true });
       } catch (e) {
-        results.push({ name: s.name, pin: s.pin, ok: false, error: (e as Error).message });
+        results.push({ name: s.name, pin: s.pin, ok: false, error: zkErrorMessage(e) });
       }
     }
 
@@ -267,18 +249,20 @@ ipcMain.handle("biometric:sync-staff", async (_, entry: { host: string; port: nu
             await zk.deleteUser(u.uid);
             removed.push({ pin: String(u.uid), ok: true });
           } catch (e) {
-            removed.push({ pin: String(u.uid), ok: false, error: (e as Error).message });
+            removed.push({ pin: String(u.uid), ok: false, error: zkErrorMessage(e) });
           }
         }
       }
     } catch (e) {
-      logger.warn("[biometric] reconciliation read-back failed:", (e as Error).message);
+      logger.warn("[biometric] reconciliation read-back failed:", zkErrorMessage(e));
     }
 
     await zk.disconnect().catch(() => {});
   } catch (e) {
-    await zk.disconnect().catch(() => {});
-    return { ok: false, error: `Device connection failed: ${(e as Error).message}`, results };
+    await zk?.disconnect().catch(() => {});
+    const msg = zkErrorMessage(e);
+    logger.warn(`[biometric] sync-staff device connection failed:`, msg);
+    return { ok: false, error: `Device connection failed: ${msg}`, results };
   }
   return {
     ok: true,
