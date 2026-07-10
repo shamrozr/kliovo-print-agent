@@ -30,7 +30,19 @@ export interface ZkClient {
   getUsers(): Promise<{ data: ZkUser[] }>;
   setUser(uid: number, userId: string, name: string, password: string, role: number, cardno: number): Promise<unknown>;
   deleteUser(uid: number): Promise<unknown>;
-  getAttendances(): Promise<{ data?: Array<{ deviceUserId?: string; id?: string; timestamp?: string }> }>;
+  // zkteco-js decodes each record as { sn, user_id, record_time, type, state }.
+  // The user_id/record_time names are what the device actually returns; the
+  // deviceUserId/id/timestamp aliases are kept only as defensive fallbacks for
+  // other library versions.
+  getAttendances(): Promise<{
+    data?: Array<{
+      user_id?: string | number;
+      record_time?: string | Date;
+      deviceUserId?: string;
+      id?: string;
+      timestamp?: string;
+    }>;
+  }>;
   setTime(t: Date): Promise<unknown>;
   disconnect(): Promise<unknown>;
 }

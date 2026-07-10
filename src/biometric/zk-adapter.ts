@@ -4,6 +4,10 @@ import { connectZk, zkErrorMessage, resolveDeviceId, sanitizeSerial, type ZkClie
 import type { BiometricDeviceEntry, DevicePunch } from "./types";
 
 interface RawLog {
+  // zkteco-js decodes attendance records as { sn, user_id, record_time, ... }.
+  // These are the REAL fields; the others are defensive aliases only.
+  user_id?: string | number;
+  record_time?: string | Date;
   deviceUserId?: string | number;
   id?: string | number;
   timestamp?: string;
@@ -29,10 +33,16 @@ interface RawLog {
 function normalizePunchLogs(logs: RawLog[]): DevicePunch[] {
   const out: DevicePunch[] = [];
   for (const entry of logs) {
-    if (entry.timestamp == null) continue;
-    const d = new Date(entry.timestamp);
-    const timestamp = Number.isNaN(d.getTime()) ? String(entry.timestamp) : d.toISOString();
-    out.push({ deviceUserId: String(entry.deviceUserId ?? entry.id ?? "unknown"), timestamp });
+    // Read the device's REAL field names first (user_id / record_time), with
+    // the old aliases as fallbacks. Reading the wrong names made every punch
+    // "unknown"/undefined — mapping to no staff member and being dropped
+    // server-side, so nothing ever landed in Dine.
+    const rawUser = entry.user_id ?? entry.deviceUserId ?? entry.id;
+    const rawTime = entry.record_time ?? entry.timestamp;
+    if (rawTime == null || rawUser == null || String(rawUser).trim() === "") continue;
+    const d = new Date(rawTime);
+    const timestamp = Number.isNaN(d.getTime()) ? String(rawTime) : d.toISOString();
+    out.push({ deviceUserId: String(rawUser).trim(), timestamp });
   }
   return out;
 }
