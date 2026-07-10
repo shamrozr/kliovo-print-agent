@@ -104,7 +104,7 @@ ipcMain.handle("biometric:status", () => {
   }
 });
 
-ipcMain.handle("biometric:test-device", async (_, entry: { host: string; port: number; label?: string }) => {
+ipcMain.handle("biometric:test-device", async (_, entry: { id: string; host: string; port: number; label?: string }) => {
   let zk: Awaited<ReturnType<typeof connectZk>> | undefined;
   try {
     zk = await connectZk(entry.host, entry.port);
@@ -112,9 +112,9 @@ ipcMain.handle("biometric:test-device", async (_, entry: { host: string; port: n
       zk.getInfo(),
       zk.getDeviceName().catch(() => "K70"),
     ]);
-    // Clean, stable device identity (falls back to host id if the terminal's
-    // serial reply is unparseable garbage — see resolveDeviceId).
-    const serial = await resolveDeviceId(zk, entry.host);
+    // Clean, stable device identity: real serial when parseable, else this
+    // device's own config id (never host-derived — see resolveDeviceId).
+    const serial = await resolveDeviceId(zk, entry.id);
     await zk.disconnect().catch(() => {});
 
     // Register/refresh this device in Dine so it shows up under Settings →
@@ -178,7 +178,7 @@ ipcMain.handle("biometric:device-users", async (_, entry: { host: string; port: 
   }
 });
 
-ipcMain.handle("biometric:sync-staff", async (_, entry: { host: string; port: number; serial?: string }) => {
+ipcMain.handle("biometric:sync-staff", async (_, entry: { id: string; host: string; port: number; serial?: string }) => {
   const config = loadConfig();
   const { serverUrl, attendanceDeviceKey } = config;
   if (!attendanceDeviceKey) {
@@ -196,7 +196,7 @@ ipcMain.handle("biometric:sync-staff", async (_, entry: { host: string; port: nu
     let probe: Awaited<ReturnType<typeof connectZk>> | undefined;
     try {
       probe = await connectZk(entry.host, entry.port);
-      serial = await resolveDeviceId(probe, entry.host);
+      serial = await resolveDeviceId(probe, entry.id);
     } catch (e) {
       return { ok: false, error: `Couldn't read the device's serial number: ${zkErrorMessage(e)}` };
     } finally {

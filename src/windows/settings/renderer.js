@@ -705,7 +705,7 @@ function renderBioDevices() {
     testBtn.addEventListener("click", function() {
       statusLine.className = "status";
       statusLine.textContent = "Connecting…";
-      window.agent.biometricTestDevice({ host: dev.host, port: dev.port || 4370, label: dev.name }).then(function(r) {
+      window.agent.biometricTestDevice({ id: dev.id, host: dev.host, port: dev.port || 4370, label: dev.name }).then(function(r) {
         if (r.ok) {
           dot.className = "dot green";
           if (r.serial) {
@@ -833,7 +833,10 @@ document.getElementById("bioAddBtn").addEventListener("click", function() {
   const host = document.getElementById("bioAddHost").value.trim();
   const port = parseInt(document.getElementById("bioAddPort").value) || 4370;
   if (!host) { alert("Enter the device IP address."); return; }
-  const id = "zk_" + Date.now();
+  // Our own stable, unique per-device id. Used as the device identity whenever
+  // the terminal's hardware serial is unreadable, so it must not collide —
+  // timestamp + random suffix. Scoped per tenant server-side either way.
+  const id = "zk_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   if (!cfg.biometricDevices) cfg.biometricDevices = [];
   cfg.biometricDevices.push({ id, name: name || host, type: "zk-tcp", host, port, enabled: true, pollIntervalMs: 15000 });
   document.getElementById("bioAddName").value = "";
@@ -854,7 +857,7 @@ document.getElementById("bioSyncStaffBtn").addEventListener("click", function() 
   st.textContent = "Fetching staff from Dine…";
   while (results.firstChild) results.removeChild(results.firstChild);
 
-  window.agent.biometricSyncStaff({ host: dev.host, port: dev.port || 4370, serial: dev.serial }).then(function(r) {
+  window.agent.biometricSyncStaff({ id: dev.id, host: dev.host, port: dev.port || 4370, serial: dev.serial }).then(function(r) {
     if (!r.ok && (!r.results || r.results.length === 0)) {
       st.className = "status err";
       st.textContent = r.error || "Failed";

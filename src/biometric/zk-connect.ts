@@ -51,29 +51,32 @@ export function newZk(host: string, port: number, timeout = 5000, inport = 4000)
  * differently, so `data.slice(8).toString('utf-8')` reads binary garbage
  * (control bytes → U+FFFD replacement chars once stored). A garbage serial
  * can't round-trip through the `?deviceSerial=` device lookup, which silently
- * breaks staff sync + ingest even though the device is registered.
+ * breaks staff sync + ingest even though the device registered.
  *
- * So: read the serial, keep only serial-safe characters ([A-Za-z0-9._-]).
- * Clean devices ("HMD6254700003") pass through untouched. If nothing usable
- * survives, fall back to a host-derived id (`zk-<host>`) — deterministic and
- * clean, so register/device-staff/ingest all agree. (Keep the K70 on a static
- * LAN IP, which we already require, and this fallback stays stable.)
+ * Preference order:
+ *   1. The real hardware serial, IF it parses to clean chars ([A-Za-z0-9._-]).
+ *      Best — human-recognizable and survives an agent reinstall.
+ *   2. Otherwise `ownId` — the agent's own per-device config id (`zk_<...>`),
+ *      generated once when the device is added and persisted in agent-config.
+ *      Already unique + clean; NOT host-derived (every K70 ships on the same
+ *      default 192.168.1.201, so a host id would be near-identical for every
+ *      tenant — a useless identifier).
  */
 export function sanitizeSerial(raw: unknown): string {
   if (raw == null) return "";
   return String(raw).replace(/[^A-Za-z0-9._-]/g, "").trim();
 }
 
-export async function resolveDeviceId(zk: ZkClient, host: string): Promise<string> {
+export async function resolveDeviceId(zk: ZkClient, ownId: string): Promise<string> {
   let clean = "";
   try {
     clean = sanitizeSerial(await zk.getSerialNumber());
   } catch {
-    // fall through to host-based id
+    // fall through to the agent's own device id
   }
   if (clean.length >= 4) return clean;
-  const hostId = sanitizeSerial(host);
-  return hostId ? `zk-${hostId}` : "zk-unknown";
+  const own = sanitizeSerial(ownId);
+  return own.length >= 4 ? own : "zk-unknown";
 }
 
 function sleep(ms: number): Promise<void> {

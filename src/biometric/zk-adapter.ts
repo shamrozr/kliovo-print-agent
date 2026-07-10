@@ -82,7 +82,7 @@ export async function startZkPolling(
       let serial = resolvedSerials.get(device.id);
       if (!serial) {
         try {
-          serial = await resolveDeviceId(zk, host);
+          serial = await resolveDeviceId(zk, device.id);
           if (serial) {
             resolvedSerials.set(device.id, serial);
             cacheDeviceSerial(device.id, serial);
