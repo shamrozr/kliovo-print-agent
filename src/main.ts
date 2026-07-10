@@ -216,8 +216,10 @@ ipcMain.handle("biometric:sync-staff", async (_, entry: { id: string; host: stri
       { headers: { Authorization: `Bearer ${attendanceDeviceKey}` }, signal: AbortSignal.timeout(10_000) }
     );
     if (!resp.ok) return { ok: false, error: `Server returned ${resp.status}: ${await resp.text().catch(() => "")}` };
-    const data = (await resp.json()) as { staff: typeof staff };
-    staff = data.staff ?? [];
+    // The server wraps payloads as { success, data: {...} }; tolerate both the
+    // top-level and enveloped shapes so a future envelope-only response still works.
+    const json = (await resp.json()) as { staff?: typeof staff; data?: { staff?: typeof staff } };
+    staff = json.staff ?? json.data?.staff ?? [];
   } catch (e) {
     return { ok: false, error: `Dine fetch failed: ${(e as Error).message}` };
   }
