@@ -8,8 +8,30 @@ import type { BiometricDeviceEntry, DevicePunch } from "./types";
 
 const STATE_PATH = path.join(app.getPath("userData"), "zk-state.json");
 
+/**
+ * Per-device sync cursor. A TIMESTAMP high-water mark, NOT a record count.
+ * ──────────────────────────────────────────────────────────────────────────
+ * A count cursor (`lastCount` + `logs.slice(lastCount)`) silently stops
+ * pushing forever the moment the device's stored count stops strictly
+ * exceeding the last-seen count — which happens on every agent restart (count
+ * unchanged), whenever the terminal's log is cleared/rotates (count drops),
+ * or if a firmware returns logs in a different order. We instead remember the
+ * newest timestamp we've already pushed, plus the identities of the punches AT
+ * that exact second (so two people punching in the same second are never
+ * conflated), and push anything at/after it that we haven't sent. The Dine
+ * ingest endpoint dedups by (device serial, timestamp) against its own
+ * watermark, so even a full resend is idempotent — this cursor only exists to
+ * keep the wire small, never as the correctness boundary.
+ */
+interface DeviceCursor {
+  lastTs: string | null;
+  idsAtLastTs: string[];
+  // legacy field tolerated on read; no longer written
+  lastCount?: number;
+}
+
 interface ZkState {
-  [deviceId: string]: { lastCount: number };
+  [deviceId: string]: DeviceCursor;
 }
 
 function loadState(): ZkState {
@@ -31,6 +53,58 @@ function saveState(state: ZkState): void {
   }
 }
 
+interface RawLog {
+  deviceUserId?: string | number;
+  id?: string | number;
+  timestamp?: string;
+}
+
+/**
+ * Given the full punch log read off a device and the persisted cursor for it,
+ * return only the punches we haven't pushed yet and the cursor to persist
+ * afterwards. Punches with an unparseable timestamp are dropped here (the
+ * server would reject them as invalid anyway) so they can't wedge the cursor.
+ */
+function selectNewPunches(
+  cursor: DeviceCursor | undefined,
+  logs: RawLog[]
+): { punches: DevicePunch[]; nextCursor: DeviceCursor } {
+  const lastTsMs = cursor?.lastTs ? new Date(cursor.lastTs).getTime() : null;
+  const seenAtLastTs = new Set(cursor?.idsAtLastTs ?? []);
+
+  const parsed = logs
+    .map((entry) => {
+      const deviceUserId = String(entry.deviceUserId ?? entry.id ?? "unknown");
+      const tsRaw = entry.timestamp ?? "";
+      const ms = new Date(tsRaw).getTime();
+      if (Number.isNaN(ms)) return null;
+      return { deviceUserId, timestamp: tsRaw, ms, identity: `${deviceUserId}@${ms}` };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+
+  const fresh = parsed.filter((p) => {
+    if (lastTsMs === null) return true; // first sync — take everything (server dedups)
+    if (p.ms > lastTsMs) return true;
+    if (p.ms === lastTsMs) return !seenAtLastTs.has(p.identity); // same-second, not yet sent
+    return false;
+  });
+
+  // Next cursor = newest timestamp present on the device + the identities of
+  // every punch at that exact second. Recomputed from the full log each time
+  // so same-second punches accumulate correctly.
+  let nextCursor: DeviceCursor = cursor ?? { lastTs: null, idsAtLastTs: [] };
+  if (parsed.length > 0) {
+    const maxMs = Math.max(...parsed.map((p) => p.ms));
+    const idsAtMax = parsed.filter((p) => p.ms === maxMs).map((p) => p.identity);
+    nextCursor = { lastTs: new Date(maxMs).toISOString(), idsAtLastTs: idsAtMax };
+  }
+
+  return {
+    punches: fresh.map((p) => ({ deviceUserId: p.deviceUserId, timestamp: p.timestamp })),
+    nextCursor,
+  };
+}
+
 /** Persist the resolved hardware serial onto this device's config entry, once. */
 function cacheDeviceSerial(configDeviceId: string, serial: string): void {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -49,6 +123,15 @@ interface ZkPoller {
 
 const activePollers = new Map<string, ZkPoller>();
 const resolvedSerials = new Map<string, string>(); // config device id -> hardware serial
+
+// Timestamp of the last time ANY device's punch log was successfully read.
+// This is the "auto-fetch is alive" heartbeat — distinct from last-push
+// (getLastSyncAt), which only advances when there were new punches to send.
+// Without it a healthy poller with nothing new to push reads "never".
+let lastScanAt: string | null = null;
+export function getLastScanAt(): string | null {
+  return lastScanAt;
+}
 
 export async function startZkPolling(
   device: BiometricDeviceEntry,
@@ -103,24 +186,20 @@ export async function startZkPolling(
 
       const attendances = await zk.getAttendances();
       const logs = Array.isArray(attendances?.data) ? attendances.data : [];
+      lastScanAt = new Date().toISOString(); // heartbeat: we reached the device
 
       const state = loadState();
-      const lastCount = state[device.id]?.lastCount ?? 0;
+      const { punches, nextCursor } = selectNewPunches(state[device.id], logs);
+      const effectiveSerial = serial ?? device.id;
 
-      if (logs.length > lastCount) {
-        const newLogs = logs.slice(lastCount);
-        const effectiveSerial = serial ?? device.id;
-        for (const entry of newLogs) {
-          const punch: DevicePunch = {
-            deviceUserId: String(entry.deviceUserId ?? entry.id ?? "unknown"),
-            timestamp: entry.timestamp ?? new Date().toISOString(),
-          };
-          onPunch(punch, effectiveSerial);
-        }
-        state[device.id] = { lastCount: logs.length };
-        saveState(state);
-        logger.info(`[zk] ${device.name}: ${newLogs.length} new punches (total: ${logs.length})`);
+      if (punches.length > 0) {
+        for (const punch of punches) onPunch(punch, effectiveSerial);
+        logger.info(`[zk] ${device.name}: ${punches.length} new punch(es) queued (device log: ${logs.length})`);
       }
+      // Persist the advanced cursor even when nothing was new, so a legacy
+      // count-based state is migrated to the timestamp cursor on first poll.
+      state[device.id] = nextCursor;
+      saveState(state);
 
       // Reset backoff on success
       backoffMs = interval;
@@ -151,6 +230,64 @@ export async function startZkPolling(
       if (timer) clearTimeout(timer);
     },
   };
+}
+
+/**
+ * One-shot, on-demand poll of a single device — backs the "Pull Attendance Now"
+ * button in Settings. Reuses the SAME `zk-state.json` lastCount cursor as the
+ * background poller, so a manual pull never double-queues punches the loop has
+ * already sent. Returns a detailed, human-readable result so the operator can
+ * see exactly what happened (connected? how many logs on device? how many new?)
+ * instead of waiting on the silent 15s loop.
+ */
+export async function pollDeviceOnce(device: BiometricDeviceEntry): Promise<{
+  ok: boolean;
+  deviceSerial?: string;
+  totalLogs?: number;
+  newPunches?: number;
+  error?: string;
+}> {
+  const host = device.host ?? "192.168.1.201";
+  const port = device.port ?? 4370;
+  let zk: ZkClient | null = null;
+  try {
+    zk = await connectZk(host, port);
+
+    let serial = resolvedSerials.get(device.id);
+    if (!serial) {
+      try {
+        serial = await resolveDeviceId(zk, device.id);
+        if (serial) {
+          resolvedSerials.set(device.id, serial);
+          cacheDeviceSerial(device.id, serial);
+        }
+      } catch {
+        // fall back to config id below
+      }
+    }
+    const effectiveSerial = serial ?? device.id;
+
+    const attendances = await zk.getAttendances();
+    const logs = Array.isArray(attendances?.data) ? attendances.data : [];
+    lastScanAt = new Date().toISOString(); // heartbeat: we reached the device
+
+    const state = loadState();
+    const { punches, nextCursor } = selectNewPunches(state[device.id], logs);
+    for (const punch of punches) {
+      queuePunch({ deviceUserId: punch.deviceUserId, timestamp: punch.timestamp, deviceId: effectiveSerial });
+    }
+    state[device.id] = nextCursor;
+    saveState(state);
+    logger.info(`[zk] ${device.name}: manual pull queued ${punches.length} new punch(es) (device log: ${logs.length})`);
+
+    return { ok: true, deviceSerial: effectiveSerial, totalLogs: logs.length, newPunches: punches.length };
+  } catch (e) {
+    const msg = zkErrorMessage(e);
+    logger.warn(`[zk] ${device.name}: manual pull failed:`, msg);
+    return { ok: false, error: msg };
+  } finally {
+    if (zk) await zk.disconnect().catch(() => {});
+  }
 }
 
 export function startAllBiometricDevices(): void {

@@ -1,5 +1,5 @@
 import { logger } from "../logger";
-import { getUnsyncedPunches, markSynced } from "./attendance-store";
+import { getUnsyncedPunches, markSynced, getQueueDepth } from "./attendance-store";
 import type { PunchQueueItem } from "./types";
 
 const SYNC_INTERVAL_MS = 5_000;
@@ -82,4 +82,16 @@ async function syncCycle(): Promise<void> {
 export function startAttendanceSync(): NodeJS.Timeout {
   logger.info("[biometric-sync] starting attendance sync (every 5s)");
   return setInterval(() => void syncCycle(), SYNC_INTERVAL_MS);
+}
+
+/**
+ * Push whatever is queued to the server immediately, out of band with the 5s
+ * loop — used by the "Pull Attendance Now" button so a manual pull lands in
+ * Dine in one shot. Returns how many punches were still queued before pushing
+ * so the UI can report it.
+ */
+export async function flushNow(): Promise<{ pending: number }> {
+  const pending = getQueueDepth();
+  await syncCycle();
+  return { pending };
 }

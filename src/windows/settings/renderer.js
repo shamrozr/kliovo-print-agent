@@ -729,6 +729,41 @@ function renderBioDevices() {
       });
     });
 
+    const pullBtn = document.createElement("button");
+    pullBtn.className = "ghost";
+    pullBtn.textContent = "Pull Attendance Now";
+    pullBtn.addEventListener("click", function() {
+      pullBtn.disabled = true;
+      const prevText = pullBtn.textContent;
+      pullBtn.textContent = "Pulling…";
+      statusLine.className = "status";
+      statusLine.textContent = "Reading punches from device…";
+      window.agent.biometricPollNow({ id: dev.id, name: dev.name, host: dev.host, port: dev.port || 4370, serial: dev.serial }).then(function(r) {
+        if (r.ok) {
+          dot.className = "dot green";
+          statusLine.className = "status ok";
+          var parts = [];
+          parts.push("Device has " + (r.totalLogs != null ? r.totalLogs : "?") + " punch record(s)");
+          parts.push((r.newPunches || 0) + " new pulled");
+          if (r.pushed) parts.push("pushed to Dine ✓");
+          else if (r.pushError) parts.push("push issue: " + r.pushError);
+          if ((r.newPunches || 0) === 0) parts.push("(nothing new since last pull)");
+          statusLine.textContent = parts.join("  |  ");
+        } else {
+          dot.className = "dot red";
+          statusLine.className = "status err";
+          statusLine.textContent = "Pull failed: " + (r.error || "unknown error");
+        }
+      }).catch(function(e) {
+        dot.className = "dot red";
+        statusLine.className = "status err";
+        statusLine.textContent = e.message;
+      }).finally(function() {
+        pullBtn.disabled = false;
+        pullBtn.textContent = prevText;
+      });
+    });
+
     const toggleBtn = document.createElement("button");
     toggleBtn.className = dev.enabled ? "ghost" : "primary";
     toggleBtn.textContent = dev.enabled ? "Disable" : "Enable";
@@ -746,7 +781,7 @@ function renderBioDevices() {
       window.agent.saveConfig(cfg).then(function() { renderBioDevices(); updateBioDeviceSelect(); });
     });
 
-    actions.append(testBtn, toggleBtn, removeBtn);
+    actions.append(testBtn, pullBtn, toggleBtn, removeBtn);
     card.append(header, statusLine, actions);
     list.appendChild(card);
   });
@@ -782,9 +817,12 @@ function pollBiometricStatus() {
   window.agent.biometricStatus().then(function(s) {
     if (!s || !s.ok) return;
     document.getElementById("bioQueueN").textContent = String(s.queueDepth || 0);
-    document.getElementById("bioSyncN").textContent = s.lastSync
-      ? new Date(s.lastSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-      : "never";
+    var fmtTime = function(v) {
+      return v ? new Date(v).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "never";
+    };
+    var scanEl = document.getElementById("bioScanN");
+    if (scanEl) scanEl.textContent = fmtTime(s.lastScan);
+    document.getElementById("bioSyncN").textContent = fmtTime(s.lastSync);
 
     const statusEl = document.getElementById("bioDeviceStatuses");
     while (statusEl.firstChild) statusEl.removeChild(statusEl.firstChild);

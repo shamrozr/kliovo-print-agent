@@ -13,8 +13,8 @@ import { initStore, prune } from "./store/db";
 import { getOfflineOverview } from "./store/repo";
 import { startCloudSync } from "./cloud-sync";
 import { initAttendanceStore, pruneOldPunches } from "./biometric/attendance-store";
-import { startAttendanceSync } from "./biometric/attendance-sync";
-import { startAllBiometricDevices, stopAllBiometricDevices, getDeviceStatuses } from "./biometric/zk-adapter";
+import { startAttendanceSync, flushNow } from "./biometric/attendance-sync";
+import { startAllBiometricDevices, stopAllBiometricDevices, getDeviceStatuses, pollDeviceOnce, getLastScanAt } from "./biometric/zk-adapter";
 import { getQueueDepth } from "./biometric/attendance-store";
 import { getLastSyncAt } from "./biometric/attendance-sync";
 import { connectZk, zkErrorMessage, resolveDeviceId, sanitizeSerial } from "./biometric/zk-connect";
@@ -78,7 +78,20 @@ function openSettings(): void {
 
 // IPC handlers
 ipcMain.handle("config:load",  ()        => loadConfig());
-ipcMain.handle("config:save",  (_, cfg)  => { saveConfig(cfg); setTrayStatus("green", openSettings); });
+ipcMain.handle("config:save",  (_, cfg)  => {
+  saveConfig(cfg);
+  setTrayStatus("green", openSettings);
+  // Re-arm biometric polling so a device added/enabled/removed in Settings
+  // starts (or stops) being polled immediately, without an agent restart.
+  // Without this, a terminal added mid-session has NO poller — its punches
+  // pile up on the device and never reach Dine until the next relaunch.
+  try {
+    stopAllBiometricDevices();
+    startAllBiometricDevices();
+  } catch (e) {
+    logger.error("[biometric] failed to re-arm polling after config save:", e);
+  }
+});
 ipcMain.handle("app:version",  ()        => app.getVersion());
 ipcMain.handle("printers:list", ()        => listSystemPrinters());
 ipcMain.handle("health:snapshot", ()      => getHealthSnapshot());
@@ -97,6 +110,7 @@ ipcMain.handle("biometric:status", () => {
       ok: true,
       queueDepth: getQueueDepth(),
       lastSync: getLastSyncAt(),
+      lastScan: getLastScanAt(),
       devices: getDeviceStatuses(),
     };
   } catch (e) {
@@ -160,6 +174,52 @@ ipcMain.handle("biometric:test-device", async (_, entry: { id: string; host: str
     const msg = zkErrorMessage(e);
     logger.warn(`[biometric] test-device ${entry.host}:${entry.port} failed:`, msg);
     return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle("biometric:poll-now", async (_, entry: { id: string; name?: string; host: string; port: number; serial?: string }) => {
+  // On-demand pull: read the device's punch log right now, queue anything new,
+  // then push to Dine immediately — so the operator gets an instant answer
+  // instead of waiting on the 15s background loop. Surfaces the exact error if
+  // the device is unreachable.
+  try {
+    const device = {
+      id: entry.id,
+      name: entry.name || entry.host,
+      type: "zk-tcp" as const,
+      host: entry.host,
+      port: entry.port,
+      enabled: true,
+      serial: entry.serial,
+    };
+    const pull = await pollDeviceOnce(device);
+    if (!pull.ok) return { ok: false, error: pull.error };
+
+    const key = loadConfig().attendanceDeviceKey;
+    let pushed = false;
+    let pushError: string | undefined;
+    if (!key) {
+      pushError = "No attendance device key saved — pull worked, but punches can't reach Dine until a key is saved.";
+    } else {
+      try {
+        await flushNow();
+        pushed = true;
+      } catch (e) {
+        pushError = zkErrorMessage(e);
+      }
+    }
+    return {
+      ok: true,
+      deviceSerial: pull.deviceSerial,
+      totalLogs: pull.totalLogs,
+      newPunches: pull.newPunches,
+      queueDepth: getQueueDepth(),
+      pushed,
+      pushError,
+      lastSync: getLastSyncAt(),
+    };
+  } catch (e) {
+    return { ok: false, error: zkErrorMessage(e) };
   }
 });
 
