@@ -43,6 +43,39 @@ export function newZk(host: string, port: number, timeout = 5000, inport = 4000)
   return new ZKLib(host || "192.168.1.201", port || 4370, timeout, inport);
 }
 
+/**
+ * Resolve a STABLE, clean identifier for a terminal.
+ * ──────────────────────────────────────────────────────────────────────────
+ * zkteco-js's getSerialNumber() assumes a fixed 8-byte response header and a
+ * clean `~SerialNumber=...` UTF-8 string. Some K70 firmwares frame the reply
+ * differently, so `data.slice(8).toString('utf-8')` reads binary garbage
+ * (control bytes → U+FFFD replacement chars once stored). A garbage serial
+ * can't round-trip through the `?deviceSerial=` device lookup, which silently
+ * breaks staff sync + ingest even though the device is registered.
+ *
+ * So: read the serial, keep only serial-safe characters ([A-Za-z0-9._-]).
+ * Clean devices ("HMD6254700003") pass through untouched. If nothing usable
+ * survives, fall back to a host-derived id (`zk-<host>`) — deterministic and
+ * clean, so register/device-staff/ingest all agree. (Keep the K70 on a static
+ * LAN IP, which we already require, and this fallback stays stable.)
+ */
+export function sanitizeSerial(raw: unknown): string {
+  if (raw == null) return "";
+  return String(raw).replace(/[^A-Za-z0-9._-]/g, "").trim();
+}
+
+export async function resolveDeviceId(zk: ZkClient, host: string): Promise<string> {
+  let clean = "";
+  try {
+    clean = sanitizeSerial(await zk.getSerialNumber());
+  } catch {
+    // fall through to host-based id
+  }
+  if (clean.length >= 4) return clean;
+  const hostId = sanitizeSerial(host);
+  return hostId ? `zk-${hostId}` : "zk-unknown";
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

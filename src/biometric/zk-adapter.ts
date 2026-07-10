@@ -3,7 +3,7 @@ import path from "path";
 import { app } from "electron";
 import { logger } from "../logger";
 import { queuePunch } from "./attendance-store";
-import { connectZk, zkErrorMessage, type ZkClient } from "./zk-connect";
+import { connectZk, zkErrorMessage, resolveDeviceId, sanitizeSerial, type ZkClient } from "./zk-connect";
 import type { BiometricDeviceEntry, DevicePunch } from "./types";
 
 const STATE_PATH = path.join(app.getPath("userData"), "zk-state.json");
@@ -62,7 +62,11 @@ export async function startZkPolling(
   let backoffMs = interval;
   const MAX_BACKOFF = 5 * 60_000; // 5 minutes
 
-  if (device.serial) resolvedSerials.set(device.id, device.serial);
+  // Only trust a cached serial that's already clean; a stale garbage value
+  // (from before the sanitizing fix) must be re-resolved so it matches the
+  // clean id the device was re-registered under.
+  const cachedClean = sanitizeSerial(device.serial);
+  if (cachedClean.length >= 4) resolvedSerials.set(device.id, cachedClean);
 
   async function poll(): Promise<void> {
     if (stopped) return;
@@ -71,19 +75,20 @@ export async function startZkPolling(
     try {
       zk = await connectZk(host, port);
 
-      // Resolve + cache the real hardware serial once. This — not the agent's
+      // Resolve + cache a clean, stable device id once. This — not the agent's
       // local config id — is what identifies the terminal to Dine, since two
-      // K70s on the same branch must never be confused with each other.
+      // K70s on the same branch must never be confused with each other. Falls
+      // back to a host-derived id when the serial reply is garbage.
       let serial = resolvedSerials.get(device.id);
       if (!serial) {
         try {
-          serial = await zk.getSerialNumber();
+          serial = await resolveDeviceId(zk, host);
           if (serial) {
             resolvedSerials.set(device.id, serial);
             cacheDeviceSerial(device.id, serial);
           }
         } catch (e) {
-          logger.warn(`[zk] ${device.name}: couldn't read serial number:`, zkErrorMessage(e));
+          logger.warn(`[zk] ${device.name}: couldn't resolve device id:`, zkErrorMessage(e));
         }
       }
 

@@ -17,7 +17,7 @@ import { startAttendanceSync } from "./biometric/attendance-sync";
 import { startAllBiometricDevices, stopAllBiometricDevices, getDeviceStatuses } from "./biometric/zk-adapter";
 import { getQueueDepth } from "./biometric/attendance-store";
 import { getLastSyncAt } from "./biometric/attendance-sync";
-import { connectZk, zkErrorMessage } from "./biometric/zk-connect";
+import { connectZk, zkErrorMessage, resolveDeviceId, sanitizeSerial } from "./biometric/zk-connect";
 import { logger } from "./logger";
 
 let settingsWin: BrowserWindow | null = null;
@@ -108,11 +108,13 @@ ipcMain.handle("biometric:test-device", async (_, entry: { host: string; port: n
   let zk: Awaited<ReturnType<typeof connectZk>> | undefined;
   try {
     zk = await connectZk(entry.host, entry.port);
-    const [info, serial, name] = await Promise.all([
+    const [info, name] = await Promise.all([
       zk.getInfo(),
-      zk.getSerialNumber().catch(() => ""),
       zk.getDeviceName().catch(() => "K70"),
     ]);
+    // Clean, stable device identity (falls back to host id if the terminal's
+    // serial reply is unparseable garbage — see resolveDeviceId).
+    const serial = await resolveDeviceId(zk, entry.host);
     await zk.disconnect().catch(() => {});
 
     // Register/refresh this device in Dine so it shows up under Settings →
@@ -185,14 +187,16 @@ ipcMain.handle("biometric:sync-staff", async (_, entry: { host: string; port: nu
 
   // A device must be registered (serial known) before we can scope its PIN
   // list — that happens automatically the first time "Test Connection"
-  // succeeds. If we don't have a serial yet, resolve it now.
-  let serial = entry.serial;
+  // succeeds. Sanitize any cached value first: an agent configured before the
+  // serial-sanitizing fix may hold a garbage serial, which would never match
+  // the freshly-registered clean id — force a re-resolve in that case.
+  let serial = sanitizeSerial(entry.serial);
 
-  if (!serial) {
+  if (serial.length < 4) {
     let probe: Awaited<ReturnType<typeof connectZk>> | undefined;
     try {
       probe = await connectZk(entry.host, entry.port);
-      serial = await probe.getSerialNumber();
+      serial = await resolveDeviceId(probe, entry.host);
     } catch (e) {
       return { ok: false, error: `Couldn't read the device's serial number: ${zkErrorMessage(e)}` };
     } finally {
