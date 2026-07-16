@@ -254,4 +254,20 @@ CREATE TABLE IF NOT EXISTS sync_state (
   key           TEXT PRIMARY KEY,
   value         TEXT
 );
+
+-- Print dedup ledger. The server delivers at-least-once (it redelivers any job
+-- it never heard an ACK for), so this table is what makes redelivery safe: a
+-- job listed here has already hit paper and must NEVER print again.
+--
+-- The acked flag tracks whether the server was told. An un-acked row is retried
+-- from here on later ticks, so an ACK lost to a network blip cannot cause a
+-- phantom reprint — the job comes back, we recognise it, and we only re-ACK.
+CREATE TABLE IF NOT EXISTS printed_jobs (
+  print_job_id  TEXT PRIMARY KEY,
+  printer_id    TEXT,
+  agent_key     TEXT,
+  printed_at    INTEGER NOT NULL,
+  acked         INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_printed_jobs_ack ON printed_jobs(acked, printed_at)
 `;

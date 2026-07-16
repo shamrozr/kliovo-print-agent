@@ -10,6 +10,7 @@ import { listSystemPrinters } from "./system-printer";
 import { buildLabelTest } from "./render/label-test";
 import { setupAutoUpdater } from "./updater";
 import { initStore, prune } from "./store/db";
+import { initPrintLedger, prunePrintLedger } from "./store/print-ledger";
 import { getOfflineOverview } from "./store/repo";
 import { startCloudSync } from "./cloud-sync";
 import { initAttendanceStore, pruneOldPunches } from "./biometric/attendance-store";
@@ -390,16 +391,22 @@ app.whenReady().then(() => {
   setTrayStatus("green", openSettings);
 
   startBridgeServer();
-  startPolling();
 
   // Offline encrypted store (used only by offline-entitled tenants). Must never
   // block printing — if it fails to initialise, the agent keeps printing fine.
+  //
+  // Opened BEFORE polling because the print dedup ledger lives here: an agent
+  // that starts polling without it would report no dedup capability on its first
+  // ticks and needlessly forfeit redelivery.
   try {
     initStore();
+    initPrintLedger();
     prune(); // sweep on boot
+    prunePrintLedger();
     setInterval(() => {
       try {
         prune();
+        prunePrintLedger();
       } catch (e) {
         logger.error("[store] prune failed:", e);
       }
@@ -411,6 +418,11 @@ app.whenReady().then(() => {
   } catch (e) {
     logger.error("[store] init failed — offline features disabled this session:", e);
   }
+
+  // Always start, even if the store failed above: printing must survive a broken
+  // store. Without the ledger the agent simply stops advertising dedup, and the
+  // server responds by not redelivering (safe: may miss, never duplicates).
+  startPolling();
 
   // Biometric attendance — optional, no-op when no devices configured
   try {
