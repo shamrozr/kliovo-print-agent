@@ -1,6 +1,6 @@
 {
   "name": "kliovo-print-agent",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Kliovo thermal print agent — routes ESC/POS jobs to local printers",
   "main": "dist/main.js",
   "author": "Kliovo",

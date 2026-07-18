@@ -157,6 +157,13 @@
     </div>
     <div class="status" id="keyStatus" style="margin-bottom:6px;">Paste this branch's key so the agent can pull offline data on its own.</div>
 
+    <label for="taxRelayKey" style="margin-top:10px;">Tax Relay Key</label>
+    <div class="row">
+      <input type="password" id="taxRelayKey" placeholder="trk_…  (from Dine → Settings → Tax)">
+      <button class="primary" id="saveTaxRelayBtn">Save</button>
+    </div>
+    <div class="status" id="taxRelayStatus" style="margin-bottom:6px;">Lets this agent submit fiscal invoices (PRA/FBR) from the restaurant's Pakistani IP.</div>
+
     <div class="section">Offline Status</div>
     <div class="badges" id="offBadges"></div>
 

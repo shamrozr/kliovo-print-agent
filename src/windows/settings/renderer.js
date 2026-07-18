@@ -331,9 +331,27 @@ function init() {
     cfg = c;
     document.getElementById("serverUrl").value = c.serverUrl || "";
     document.getElementById("offlineDeviceKey").value = c.offlineDeviceKey || "";
+    document.getElementById("taxRelayKey").value = c.taxRelayKey || "";
     renderPrinters();
   });
 }
+
+// Save the tax relay key (same config blob).
+document.getElementById("saveTaxRelayBtn").addEventListener("click", function() {
+  const st = document.getElementById("taxRelayStatus");
+  cfg.taxRelayKey = document.getElementById("taxRelayKey").value.trim();
+  st.className = "status";
+  st.textContent = "Saving…";
+  window.agent.saveConfig(cfg).then(function() {
+    st.className = "status ok";
+    st.textContent = cfg.taxRelayKey
+      ? "Saved ✓ — the agent will now relay fiscal invoices for this branch."
+      : "Key cleared.";
+  }).catch(function(e) {
+    st.className = "status err";
+    st.textContent = e.message;
+  });
+});
 
 // Save the offline device key (kept in the same config as printers/serverUrl).
 document.getElementById("saveKeyBtn").addEventListener("click", function() {

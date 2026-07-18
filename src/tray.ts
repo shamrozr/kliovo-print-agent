@@ -10,6 +10,18 @@ export type TrayStatus = "green" | "yellow" | "red";
 let openSettingsRef: () => void = () => {};
 let currentStatus: TrayStatus = "green";
 let activityLines: string[] = [];
+// A downloaded update waiting for the user to install it (see updater.ts).
+let pendingUpdate: { version: string; install: () => void } | null = null;
+
+/**
+ * Surface a downloaded-but-not-installed update in the tray. Installation is
+ * user-initiated only — clicking the menu item is the consent. Pass null to
+ * clear (e.g. after install).
+ */
+export function setPendingUpdate(version: string | null, install?: () => void): void {
+  pendingUpdate = version && install ? { version, install } : null;
+  rebuildMenu();
+}
 
 function iconPath(status: TrayStatus): string {
   return path.join(app.getAppPath(), "assets", `tray-${status}.png`);
@@ -71,10 +83,21 @@ function rebuildMenu(): void {
     : currentStatus === "yellow" ? "Status: recent print issues"
     : "Status: print FAILING";
 
+  const updateItems: Electron.MenuItemConstructorOptions[] = pendingUpdate
+    ? [
+        {
+          label: `⬇ Install update v${pendingUpdate.version}…`,
+          click: () => pendingUpdate?.install(),
+        },
+        { type: "separator" },
+      ]
+    : [];
+
   const menu = Menu.buildFromTemplate([
     { label: `Kliovo Print Agent v${app.getVersion()}`, enabled: false },
     { label: statusLabel, enabled: false },
     { type: "separator" },
+    ...updateItems,
     ...printerItems,
     ...activityItems,
     { type: "separator" },

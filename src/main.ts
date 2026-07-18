@@ -440,6 +440,11 @@ app.whenReady().then(() => {
     logger.error("[biometric] init failed:", e);
   }
 
+  // Tax relay — optional, self-idles until a tax relay key is configured.
+  import("./tax-relay")
+    .then(({ startTaxRelay }) => startTaxRelay())
+    .catch((e) => logger.error("[tax-relay] init failed:", e));
+
   // Register auto-start on login (Windows + macOS)
   app.setLoginItemSettings({ openAtLogin: true, openAsHidden: true });
 

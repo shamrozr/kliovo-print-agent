@@ -51,6 +51,15 @@ export interface AgentConfig {
    */
   offlineDeviceKey?: string;
 
+  /**
+   * Per-branch "Tax relay key" (trk_…), pasted by an admin from Dine → Settings
+   * → Tax. Lets this agent relay fiscal API calls (PRA/FBR) from the restaurant's
+   * Pakistani IP because the foreign-hosted server is geo-blocked. The server
+   * resolves the tenant FROM this key (like the offline/attendance keys) and the
+   * PRA/FBR token travels inside each task — the agent never stores it.
+   */
+  taxRelayKey?: string;
+
   /** Biometric attendance devices (ZKTeco TCP, ADMS HTTP, etc.). */
   biometricDevices: BiometricDeviceEntry[];
   /**
