@@ -71,6 +71,44 @@ async function ackJob(
   }
 }
 
+/**
+ * NACK a job we failed to deliver. This is what actually kills head-of-line
+ * blocking: a job left `printing` on a down printer is reclaimed as the
+ * OLDEST job on every poll, forever shadowing every newer ticket behind it.
+ * Telling the server to fail the job (and mark the printer offline) frees
+ * that slot immediately so newer jobs can be served. Best-effort — if the
+ * NACK itself fails, the job is still stuck server-side, but we've already
+ * given up on it locally and move on rather than blocking this printer's
+ * poll loop on a second network call.
+ */
+async function nackJob(
+  serverUrl: string,
+  printJobId: string,
+  agentKey: string,
+  error: unknown
+): Promise<void> {
+  try {
+    const res = await fetch(`${serverUrl}/api/print/${printJobId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${agentKey}`,
+        "X-Agent-Version": app.getVersion(),
+      },
+      body:   JSON.stringify({ action: "nack", error: String(error).slice(0, 500) }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) {
+      logger.warn(`[poll] nack ${printJobId} HTTP ${res.status}`);
+      return;
+    }
+    // Never log agentKey — it is a bearer secret that would leak into agent.log.
+    logger.warn(`[poll] nacked job ${printJobId}`);
+  } catch (e) {
+    logger.warn(`[poll] nack ${printJobId} failed: ${(e as Error).message}`);
+  }
+}
+
 /** Retry ACKs for jobs we printed but never got confirmation for. */
 async function flushPendingAcks(serverUrl: string): Promise<void> {
   const pending = pendingAcks();
@@ -121,8 +159,15 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
   try {
     await deliverToPrinter(printer, bytes);
   } catch (e) {
-    recordResult({ printerId: printer.printerId, printerName: printer.name, kind: "queued", ok: false, error: (e as Error).message });
-    throw e;
+    // Do NOT rethrow: an uncleared "printing" job on the server is reclaimed
+    // as the OLDEST job on every subsequent poll, so it would head-of-line
+    // block every newer ticket to this printer for as long as it's down.
+    // NACKing fails the job server-side and frees the printer to move on.
+    const msg = (e as Error).message;
+    recordResult({ printerId: printer.printerId, printerName: printer.name, kind: "queued", ok: false, error: msg });
+    await nackJob(serverUrl, printJobId, printer.agentKey, msg);
+    logger.warn(`[poll] delivery failed for ${printJobId} on ${printer.printerId}: ${msg} — nacked (parked)`);
+    return;
   }
 
   // Record BEFORE acking: the gap between paper coming out and the ledger write
@@ -148,36 +193,56 @@ function usablePrinters(printers: PrinterEntry[]): PrinterEntry[] {
   });
 }
 
-export function startPolling(): NodeJS.Timeout {
-  let consecutiveErrors = 0;
+/**
+ * Printers currently mid poll-and-deliver. This is what gives each printer
+ * its own timeline: a printer can take 5-6s to fail through delivery
+ * retries, but `Promise.all`-ing every printer on one shared tick would
+ * stretch every OTHER printer's poll cycle out to match the slowest one.
+ * Skipping a printer that's still in-flight (rather than awaiting it) means
+ * a stuck printer just misses a tick or two of its own — it never delays
+ * anyone else's.
+ */
+const inFlight = new Set<string>();
 
+/** Per-printer consecutive-error counts, used only to back off a chronically failing printer. */
+const consecutiveErrors = new Map<string, number>();
+
+/** Per-printer timestamp of the last poll attempt, used to pace the backoff below. */
+const lastAttemptAt = new Map<string, number>();
+
+export function startPolling(): NodeJS.Timeout {
   const tick = async () => {
     const config = loadConfig();
     const printers = usablePrinters(config.printers);
     if (printers.length === 0) return;
 
-    try {
-      await flushPendingAcks(config.serverUrl);
-      await Promise.all(
-        printers.map((p) =>
-          pollPrinter(config.serverUrl, p).catch((e) => {
-            consecutiveErrors++;
-            logger.warn(`[poll] error for ${p.printerId}: ${(e as Error).message}`);
-          })
-        )
-      );
-      consecutiveErrors = 0;
-    } catch (e) {
-      logger.error(`[poll] tick error: ${(e as Error).message}`);
+    flushPendingAcks(config.serverUrl).catch((e) => {
+      logger.warn(`[poll] flushPendingAcks error: ${(e as Error).message}`);
+    });
+
+    const now = Date.now();
+    for (const p of printers) {
+      if (inFlight.has(p.printerId)) continue; // still working the previous job — don't pile up
+
+      // Cheap per-printer backoff: a chronically failing printer polls at
+      // BACKOFF_INTERVAL_MS instead of every tick, without needing its own
+      // timer. Every other printer is unaffected either way.
+      const errCount = consecutiveErrors.get(p.printerId) ?? 0;
+      const last     = lastAttemptAt.get(p.printerId) ?? 0;
+      const interval = errCount > 5 ? BACKOFF_INTERVAL_MS : POLL_INTERVAL_MS;
+      if (now - last < interval) continue;
+
+      inFlight.add(p.printerId);
+      lastAttemptAt.set(p.printerId, now);
+      pollPrinter(config.serverUrl, p)
+        .then(() => consecutiveErrors.set(p.printerId, 0))
+        .catch((e) => {
+          consecutiveErrors.set(p.printerId, errCount + 1);
+          logger.warn(`[poll] error for ${p.printerId}: ${(e as Error).message}`);
+        })
+        .finally(() => inFlight.delete(p.printerId));
     }
   };
 
-  let currentInterval = POLL_INTERVAL_MS;
-  let timer = setTimeout(function run() {
-    tick().finally(() => {
-      currentInterval = consecutiveErrors > 5 ? BACKOFF_INTERVAL_MS : POLL_INTERVAL_MS;
-      timer = setTimeout(run, currentInterval);
-    });
-  }, currentInterval);
-  return timer;
+  return setInterval(tick, POLL_INTERVAL_MS);
 }

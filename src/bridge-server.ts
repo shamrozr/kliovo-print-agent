@@ -2,6 +2,7 @@ import http from "http";
 import { loadConfig } from "./config";
 import { deliverToPrinter } from "./deliver";
 import { recordResult, getHealthSnapshot } from "./health";
+import { hasPrinted, markPrinted } from "./store/print-ledger";
 import { renderJob, renderContextFromPrinter, type PrintJobData } from "./render";
 import { logger } from "./logger";
 import {
@@ -70,12 +71,19 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Private-Network": "true",
 };
 
-async function ackJob(serverUrl: string, printJobId: string): Promise<void> {
+async function ackJob(serverUrl: string, printJobId: string, agentKey: string): Promise<void> {
   try {
     await fetch(`${serverUrl}/api/print/${printJobId}`, {
       method:  "PATCH",
-      headers: { "Content-Type": "application/json" },
+      // Without a Bearer token the Dine ack route falls through to session auth
+      // and 401s — the server then never learns the job was printed.
+      headers: {
+        "Content-Type":    "application/json",
+        "Authorization":   `Bearer ${agentKey}`,
+        "X-Agent-Version": appVersion,
+      },
       body:    JSON.stringify({ action: "ack" }),
+      signal:  AbortSignal.timeout(8000),
     });
   } catch (e) {
     logger.warn(`[bridge] ack failed for ${printJobId}: ${(e as Error).message}`);
@@ -132,12 +140,24 @@ export function startBridgeServer(): http.Server {
             return;
           }
 
+          // Ledger dedup — a redelivered push (server retried before it saw our
+          // ack) must not print twice. Re-ack so the server closes the job out.
+          if (printJobId && hasPrinted(printJobId)) {
+            logger.info(`[bridge] ledger dedup — skipped duplicate job ${printJobId}`);
+            void ackJob(config.serverUrl, printJobId, pc.agentKey);
+            send(200, { ok: true, deduped: true });
+            return;
+          }
+
           logger.info(`[bridge] received raw job ${printJobId ?? "?"} for ${printerId}`);
           try {
             const bytes = Buffer.from(bytesBase64, "base64");
             await deliverToPrinter(pc, bytes);
             recordResult({ printerId, printerName: pc.name, kind: "raw", ok: true });
-            if (printJobId) void ackJob(config.serverUrl, printJobId);
+            // Record to the ledger BEFORE the ack — that ordering bounds the
+            // crash window during which a redelivery could double-print.
+            if (printJobId) markPrinted(printJobId, printerId, pc.agentKey);
+            if (printJobId) void ackJob(config.serverUrl, printJobId, pc.agentKey);
             send(200, { ok: true });
           } catch (e) {
             recordResult({ printerId, printerName: pc.name, kind: "raw", ok: false, error: (e as Error).message });
@@ -186,6 +206,15 @@ export function startBridgeServer(): http.Server {
             return;
           }
 
+          // Ledger dedup — mirrors /print. The in-memory seenRecently() above
+          // only guards a short window; the ledger survives restarts.
+          if (printJobId && hasPrinted(printJobId)) {
+            logger.info(`[bridge] ledger dedup — skipped duplicate job ${printJobId}`);
+            void ackJob(config.serverUrl, printJobId, pc.agentKey);
+            send(200, { ok: true, deduped: true });
+            return;
+          }
+
           logger.info(`[bridge] received ${job.kind} job ${printJobId ?? dedupKey ?? "?"} for ${printerId}`);
           try {
             // The agent's local config is the source of truth for hardware
@@ -194,7 +223,10 @@ export function startBridgeServer(): http.Server {
             const bytes = renderJob(job, renderContextFromPrinter(pc));
             await deliverToPrinter(pc, bytes);
             recordResult({ printerId, printerName: pc.name, kind: job.kind, ok: true });
-            if (printJobId) void ackJob(config.serverUrl, printJobId);
+            // Record to the ledger BEFORE the ack — bounds the crash window
+            // during which a redelivery could double-print.
+            if (printJobId) markPrinted(printJobId, printerId, pc.agentKey);
+            if (printJobId) void ackJob(config.serverUrl, printJobId, pc.agentKey);
             send(200, { ok: true, rendered: true });
           } catch (e) {
             recordResult({ printerId, printerName: pc.name, kind: job.kind, ok: false, error: (e as Error).message });

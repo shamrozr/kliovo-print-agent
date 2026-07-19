@@ -4,7 +4,7 @@
  * (bridge endpoints, test print, polling) never branch on it themselves.
  */
 import type { PrinterEntry } from "./config";
-import { sendRawToPrinter } from "./tcp-sender";
+import { deliverRawWithRetry } from "./tcp-sender";
 import { sendRawToSystemPrinter } from "./system-printer";
 
 export async function deliverToPrinter(pc: PrinterEntry, bytes: Buffer): Promise<void> {
@@ -13,5 +13,7 @@ export async function deliverToPrinter(pc: PrinterEntry, bytes: Buffer): Promise
     return;
   }
   // Default / "network": TCP socket to the printer (port 9100 unless set).
-  await sendRawToPrinter(pc.host, pc.port || 9100, bytes);
+  // deliverRawWithRetry only retries pre-connect failures (see tcp-sender.ts)
+  // so we never risk double-printing a partially/fully delivered job.
+  await deliverRawWithRetry(pc.host, pc.port || 9100, bytes);
 }
