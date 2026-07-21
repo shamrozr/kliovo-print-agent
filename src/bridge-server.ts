@@ -282,7 +282,7 @@ export function startBridgeServer(): http.Server {
       }
 
       // ── Offline POS endpoints (token-gated — used by the Aster app) ──
-      if (req.url.startsWith("/local/pos/")) {
+      if (req.url.startsWith("/local/pos/") || req.url.startsWith("/local/print/")) {
         const session = verifyToken(req.headers["x-aster-token"] as string | undefined);
         if (!session) {
           send(401, { ok: false, error: "unauthorized" });
@@ -294,6 +294,21 @@ export function startBridgeServer(): http.Server {
           send(500, { ok: false, error: (e as Error).message });
         };
         try {
+          if (req.method === "POST" && req.url === "/local/print/reprint") {
+            readBody(req)
+              .then(async (raw) => {
+                try {
+                  const b = JSON.parse(raw || "{}") as { orderId: string; kind: "receipt" | "kot"; stationId?: string | null };
+                  const { reprintReceipt, reprintKot } = await import("./print/fire");
+                  const r = b.kind === "kot" ? await reprintKot(b.orderId, b.stationId ?? null) : await reprintReceipt(b.orderId);
+                  send(r.ok ? 200 : 400, r);
+                } catch (e) {
+                  failp(e);
+                }
+              })
+              .catch(failp);
+            return;
+          }
           if (req.method === "GET" && req.url === "/local/pos/menu") return okp({ menu: getMenu() });
           if (req.method === "GET" && req.url === "/local/pos/tables") return okp({ tables: getTables() });
           if (req.method === "GET" && req.url === "/local/pos/combos") return okp({ combos: getCombos() });

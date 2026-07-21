@@ -128,3 +128,42 @@ export async function fireReceipt(orderId: string, paymentId: string): Promise<v
     logger.error(`[fire] fireReceipt ${orderId}: ${(e as Error).message}`);
   }
 }
+
+/** Explicit reprint — BYPASSES printed_jobs (for jams). Renders + delivers once. */
+export async function reprintReceipt(orderId: string): Promise<{ ok: boolean; error?: string }> {
+  const order = pr.getOrderRow(orderId);
+  if (!order) return { ok: false, error: "order not found" };
+  const target = resolveReceiptTarget(pr.getMirroredPrinters(), pr.getMirroredRoutes(), order.source || "dine_in");
+  if (!target) return { ok: false, error: "no active printer" };
+  const branding = pr.getBranding();
+  const { time, date } = fmtTime(Date.now());
+  const input = buildReceiptInput(order, pr.getOrderItems(orderId), [], branding, time, date, pr.getTableName(order.table_id ?? undefined));
+  const bytes = renderJob({ kind: "receipt", input }, renderContextFromPrinter(target.printer));
+  try {
+    await deliverToPrinter(target.printer, bytes);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Reprint a station's KOT for all its items — bypasses the ledger. */
+export async function reprintKot(orderId: string, stationId: string | null): Promise<{ ok: boolean; error?: string }> {
+  const order = pr.getOrderRow(orderId);
+  if (!order) return { ok: false, error: "order not found" };
+  const items = pr.getOrderItems(orderId).filter((i) => (i.station_id ?? null) === stationId);
+  if (items.length === 0) return { ok: false, error: "no items for station" };
+  const targets = resolveKotTargets(pr.getMirroredPrinters(), pr.getMirroredRoutes(), order.source || "dine_in", stationId);
+  if (targets.length === 0) return { ok: false, error: "no active printer" };
+  const station = pr.getStation(stationId);
+  const { time, date } = fmtTime(order.created_at || Date.now());
+  const input = buildKotInput(order, items, station, pr.getTableName(order.table_id ?? undefined), time, date);
+  input.version = 2;
+  const bytes = renderJob({ kind: "kot", input }, renderContextFromPrinter(targets[0].printer));
+  try {
+    await deliverToPrinter(targets[0].printer, bytes);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
