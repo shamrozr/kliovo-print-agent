@@ -32,6 +32,19 @@ function runMigrations(conn: Database.Database): void {
   } catch (e) {
     if (!/duplicate column/i.test((e as Error).message)) throw e;
   }
+
+  for (const col of [
+    "combo_id TEXT",
+    "combo_name TEXT",
+    "combo_price REAL",
+    "combo_picks TEXT",
+  ]) {
+    try {
+      conn.prepare(`ALTER TABLE order_items ADD COLUMN ${col}`).run();
+    } catch (e) {
+      if (!/duplicate column/i.test((e as Error).message)) throw e;
+    }
+  }
 }
 
 /** Open (or create) the encrypted local DB. Safe to call once on app ready. */

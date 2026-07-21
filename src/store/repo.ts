@@ -338,17 +338,35 @@ export function getOfflineOrdersForPush(): { orderId: string; payload: PushOrder
       taxRate,
       serviceChargeRate: scRate,
       discountAmount: Number(o.discount_amount) || 0,
-      items: items.map((it) => ({
-        menuItemId: it.menu_item_id ?? null,
-        variantId: it.variant_id ?? null,
-        name: it.name,
-        quantity: Number(it.quantity) || 1,
-        unitPrice: Number(it.unit_price) || 0,
-        modifiers: safeParse(it.modifiers),
-        notes: it.notes ?? null,
-        course: it.course ?? null,
-        stationId: it.station_id ?? null,
-      })),
+      items: items.map((it) => {
+        if (it.combo_id) {
+          let picks: unknown[] = [];
+          try {
+            picks = JSON.parse(it.combo_picks || "[]");
+          } catch {
+            picks = [];
+          }
+          return {
+            comboId: it.combo_id,
+            comboName: it.combo_name ?? null,
+            comboPrice: Number(it.combo_price) || 0,
+            picks,
+            quantity: Number(it.quantity) || 1,
+            stationId: it.station_id ?? null,
+          };
+        }
+        return {
+          menuItemId: it.menu_item_id ?? null,
+          variantId: it.variant_id ?? null,
+          name: it.name,
+          quantity: Number(it.quantity) || 1,
+          unitPrice: Number(it.unit_price) || 0,
+          modifiers: safeParse(it.modifiers),
+          notes: it.notes ?? null,
+          course: it.course ?? null,
+          stationId: it.station_id ?? null,
+        };
+      }),
       payments: pays
         .filter((p) => !p.is_refunded)
         .map((p) => ({

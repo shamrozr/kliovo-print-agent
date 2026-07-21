@@ -182,6 +182,10 @@ CREATE TABLE IF NOT EXISTS order_items (
   station_id    TEXT,
   kitchen_status TEXT DEFAULT 'pending',
   fired_at      INTEGER,
+  combo_id      TEXT,
+  combo_name    TEXT,
+  combo_price   REAL,
+  combo_picks   TEXT,
   sort_order    INTEGER DEFAULT 0,
   created_at    INTEGER
 );

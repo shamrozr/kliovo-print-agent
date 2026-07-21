@@ -262,6 +262,10 @@ export interface CreateOrderInput {
     notes?: string | null;
     course?: string | null;
     stationId?: string | null;
+    comboId?: string | null;
+    comboName?: string | null;
+    comboPrice?: number | null;
+    picks?: Array<{ groupId?: string; menuItemId?: string; variantId?: string | null; upcharge?: number }>;
   }>;
 }
 
@@ -315,8 +319,10 @@ export function createOrder(input: CreateOrderInput) {
     });
     const insItem = d.prepare(
       `INSERT INTO order_items (id, order_id, menu_item_id, variant_id, name, quantity, unit_price,
-        total_price, modifiers, notes, course, station_id, kitchen_status, sort_order, created_at)
-       VALUES (@id,@orderId,@menuItemId,@variantId,@name,@qty,@unit,@total,@mods,@notes,@course,@station,'pending',@sort,@ts)`
+        total_price, modifiers, notes, course, station_id, kitchen_status, sort_order, created_at,
+        combo_id, combo_name, combo_price, combo_picks)
+       VALUES (@id,@orderId,@menuItemId,@variantId,@name,@qty,@unit,@total,@mods,@notes,@course,@station,'pending',@sort,@ts,
+        @comboId,@comboName,@comboPrice,@comboPicks)`
     );
     input.items.forEach((it, i) => {
       const mods = it.modifiers ?? [];
@@ -336,6 +342,10 @@ export function createOrder(input: CreateOrderInput) {
         station: it.stationId ?? null,
         sort: i,
         ts,
+        comboId: it.comboId ?? null,
+        comboName: it.comboName ?? null,
+        comboPrice: it.comboPrice ?? null,
+        comboPicks: it.picks ? JSON.stringify(it.picks) : null,
       });
     });
     logChange("order", orderId, "create_order", { ...input, localId: orderId, reference: ref }, input.terminalCode);
@@ -370,7 +380,19 @@ export function updateStatus(orderId: string, status: string) {
 
 export function addItem(
   orderId: string,
-  item: { menuItemId?: string; name: string; quantity: number; unitPrice: number; modifiers?: any[]; notes?: string; stationId?: string }
+  item: {
+    menuItemId?: string;
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    modifiers?: any[];
+    notes?: string;
+    stationId?: string;
+    comboId?: string | null;
+    comboName?: string | null;
+    comboPrice?: number | null;
+    picks?: Array<{ groupId?: string; menuItemId?: string; variantId?: string | null; upcharge?: number }>;
+  }
 ) {
   const d = getStore();
   const itemId = id("oi");
@@ -379,10 +401,11 @@ export function addItem(
   const count = (d.prepare("SELECT count(*) c FROM order_items WHERE order_id=?").get(orderId) as any).c;
   const tx = d.transaction(() => {
     d.prepare(
-      `INSERT INTO order_items (id, order_id, menu_item_id, name, quantity, unit_price, total_price, modifiers, notes, station_id, kitchen_status, sort_order, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?,?)`
+      `INSERT INTO order_items (id, order_id, menu_item_id, name, quantity, unit_price, total_price, modifiers, notes, station_id, kitchen_status, sort_order, created_at, combo_id, combo_name, combo_price, combo_picks)
+       VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?)`
     ).run(itemId, orderId, item.menuItemId ?? null, item.name, item.quantity, item.unitPrice,
-      (item.unitPrice + modTotal) * item.quantity, JSON.stringify(mods), item.notes ?? null, item.stationId ?? null, count, now());
+      (item.unitPrice + modTotal) * item.quantity, JSON.stringify(mods), item.notes ?? null, item.stationId ?? null, count, now(),
+      item.comboId ?? null, item.comboName ?? null, item.comboPrice ?? null, item.picks ? JSON.stringify(item.picks) : null);
     recalc(orderId);
     logChange("item", orderId, "add_item", { orderId, item: { ...item, id: itemId } });
   });
