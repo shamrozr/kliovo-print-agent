@@ -32,7 +32,9 @@ import {
   addItem,
   voidItem,
   refundPayment,
+  getOrder,
 } from "./store/pos-repo";
+import { getAppliedOrderId, recordApplied } from "./store/idempotency";
 import { fireOnCreate, fireOnAddItem, fireReceipt } from "./print/fire";
 
 export const BRIDGE_PORT = 6310;
@@ -321,18 +323,36 @@ export function startBridgeServer(): http.Server {
                 try {
                   const b = JSON.parse(raw || "{}");
                   if (route === "/local/pos/order/create") {
+                    const key = typeof b.idempotencyKey === "string" ? b.idempotencyKey : null;
+                    if (key) {
+                      const priorId = getAppliedOrderId(key);
+                      if (priorId) return okp({ order: getOrder(priorId), idempotent: true });
+                    }
                     const order = createOrder(b) as { id: string };
+                    if (key) recordApplied(key, order.id);
                     void fireOnCreate(order.id);
                     return okp({ order });
                   }
                   if (route === "/local/pos/order/pay") {
+                    const key = typeof b.idempotencyKey === "string" ? b.idempotencyKey : null;
+                    if (key) {
+                      const priorId = getAppliedOrderId(key);
+                      if (priorId) return okp({ order: getOrder(priorId), idempotent: true });
+                    }
                     const order = addPayment(b.orderId, b) as { id: string; lastPaymentId?: string };
+                    if (key) recordApplied(key, order.id);
                     void fireReceipt(order.id, order.lastPaymentId ?? String(b.paymentId ?? "pay"));
                     return okp({ order });
                   }
                   if (route === "/local/pos/order/status") return okp({ order: updateStatus(b.orderId, b.status) });
                   if (route === "/local/pos/order/add-item") {
+                    const key = typeof b.idempotencyKey === "string" ? b.idempotencyKey : null;
+                    if (key) {
+                      const priorId = getAppliedOrderId(key);
+                      if (priorId) return okp({ order: getOrder(priorId), idempotent: true });
+                    }
                     const order = addItem(b.orderId, b.item) as { id: string };
+                    if (key) recordApplied(key, order.id);
                     void fireOnAddItem(order.id);
                     return okp({ order });
                   }

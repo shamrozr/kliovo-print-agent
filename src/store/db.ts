@@ -93,6 +93,7 @@ export function prune(now: number = Date.now()): {
   orders: number;
   shifts: number;
   changeLog: number;
+  appliedMutations: number;
 } {
   const d = getStore();
   const cutoff = now - ONLINE_RETENTION_MS;
@@ -104,10 +105,14 @@ export function prune(now: number = Date.now()): {
     const shifts = d.prepare(`DELETE FROM shifts WHERE ${prunable}`).run({ cutoff });
     // Outbox entries are pruned only once synced.
     const changeLog = d.prepare(`DELETE FROM change_log WHERE synced_at IS NOT NULL`).run();
+    // Idempotency records: retries happen within seconds, so the same
+    // retention window as online orders is far more than enough headroom.
+    const appliedMutations = d.prepare(`DELETE FROM applied_mutations WHERE applied_at < @cutoff`).run({ cutoff });
     return {
       orders: orders.changes,
       shifts: shifts.changes,
       changeLog: changeLog.changes,
+      appliedMutations: appliedMutations.changes,
     };
   });
 

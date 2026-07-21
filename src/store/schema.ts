@@ -324,4 +324,9 @@ CREATE TABLE IF NOT EXISTS branding (
   tax_lines  TEXT DEFAULT '[]',
   updated_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS applied_mutations (
+  idempotency_key TEXT PRIMARY KEY,
+  order_id        TEXT,
+  applied_at      INTEGER NOT NULL
+);
 `;
