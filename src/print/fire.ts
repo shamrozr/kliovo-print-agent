@@ -21,10 +21,14 @@ function fmtTime(ms: number): { time: string; date: string } {
   };
 }
 
-async function deliverOnce(jobId: string, target: ResolvedTarget, bytes: Buffer, label: string): Promise<void> {
+/** Returns true if the ticket reached paper (or was already printed), false if
+ *  delivery failed. Callers use this to decide whether to mark items fired — a
+ *  failed fire must stay retryable so a transiently-dead printer never silently
+ *  drops a real ticket. */
+async function deliverOnce(jobId: string, target: ResolvedTarget, bytes: Buffer, label: string): Promise<boolean> {
   if (hasPrinted(jobId)) {
     logger.info(`[fire] ${jobId} already printed — skipping (dedup)`);
-    return;
+    return true;
   }
   try {
     for (let i = 0; i < target.copies; i++) {
@@ -40,6 +44,7 @@ async function deliverOnce(jobId: string, target: ResolvedTarget, bytes: Buffer,
     if (target.fallback) {
       logger.warn(`[fire] ${label} used FALLBACK printer ${target.printer.printerId} — routing incomplete`);
     }
+    return true;
   } catch (e) {
     logger.error(`[fire] ${label} delivery failed on ${target.printer.printerId}: ${(e as Error).message}`);
     recordResult({
@@ -49,6 +54,7 @@ async function deliverOnce(jobId: string, target: ResolvedTarget, bytes: Buffer,
       ok: false,
       error: (e as Error).message,
     });
+    return false;
   }
 }
 
@@ -81,10 +87,18 @@ async function fireKotsForItems(orderId: string, items: pr_ItemRow[]): Promise<v
     const input = buildKotInput(order, stationItems, station, tableName, time, date);
     const bytes = renderJob({ kind: "kot", input }, renderContextFromPrinter(targets[0].printer));
     const jobId = kotJobId(orderId, stationId, seq++);
+    let anyDelivered = false;
     for (const target of targets) {
-      await deliverOnce(`${jobId}:${target.printer.printerId}`, target, bytes, `KOT ${orderId}/${stationId}`);
+      const ok = await deliverOnce(`${jobId}:${target.printer.printerId}`, target, bytes, `KOT ${orderId}/${stationId}`);
+      anyDelivered = anyDelivered || ok;
     }
-    pr.markItemsFired(stationItems.map((i) => i.id));
+    // Only mark fired if the kitchen actually got the ticket. A failed fire
+    // leaves fired_at NULL so the next add-item / reconnect tick retries it.
+    if (anyDelivered) {
+      pr.markItemsFired(stationItems.map((i) => i.id));
+    } else {
+      logger.error(`[fire] order ${orderId} station ${stationId}: KOT delivery failed on all targets — items left unfired for retry`);
+    }
   }
 }
 
