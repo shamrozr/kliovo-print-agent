@@ -71,6 +71,10 @@ export interface AgentConfig {
    * one branch instead of every tenant on the platform.
    */
   attendanceDeviceKey?: string;
+
+  /** Push continued-order op-deltas to the server merge endpoint. OFF until the
+   *  server route is deployed (emitting ops a server can't merge would 4xx). */
+  pushContinuedOps?: boolean;
 }
 
 const CONFIG_DIR  = app.getPath("userData");

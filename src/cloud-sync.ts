@@ -4,7 +4,9 @@ import {
   setState,
   getOfflineOrdersForPush,
   markOrdersPushed,
+  markSynced,
 } from "./store/repo";
+import { getContinuedOrderOpsForPush, getContinuedOpIds } from "./store/continued-repo";
 import { logger } from "./logger";
 
 // How often the agent pulls the offline snapshot from the server. Offline data
@@ -130,9 +132,55 @@ async function pushOnce(): Promise<void> {
   }
 }
 
+/**
+ * Push change_log op-deltas for CONTINUED orders (tabs that started online and
+ * were edited offline) to the server merge endpoint. Guarded OFF by default —
+ * `pushContinuedOps` stays false until the server's merge route is confirmed
+ * deployed, so the agent never emits ops a server without that route would 4xx.
+ */
+async function pushContinuedOnce(): Promise<void> {
+  const cfg = loadConfig();
+  if (!cfg.pushContinuedOps) return; // OFF until server merge endpoint is live
+  const key = (cfg.offlineDeviceKey ?? "").trim();
+  if (!key || !cfg.serverUrl) return;
+  let ops: ReturnType<typeof getContinuedOrderOpsForPush>;
+  let ids: string[];
+  try {
+    ops = getContinuedOrderOpsForPush();
+    ids = getContinuedOpIds();
+  } catch (e) {
+    logger.warn(`[cloud-sync] read continued ops failed: ${(e as Error).message}`);
+    return;
+  }
+  if (ops.length === 0) return;
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.serverUrl}/api/offline/orders/ops`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ops }),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (e) {
+    logger.warn(`[cloud-sync] continued ops push failed: ${(e as Error).message}`);
+    return;
+  }
+  if (!res.ok) {
+    logger.warn(`[cloud-sync] continued ops push HTTP ${res.status}`);
+    return;
+  }
+  try {
+    markSynced(ids);
+    logger.info(`[cloud-sync] pushed ${ops.length} continued-order ops`);
+  } catch (e) {
+    logger.warn(`[cloud-sync] markSynced (continued) failed: ${(e as Error).message}`);
+  }
+}
+
 async function cycle(): Promise<void> {
   await syncOnce();
   await pushOnce();
+  await pushContinuedOnce();
 }
 
 export function startCloudSync(): NodeJS.Timeout {
