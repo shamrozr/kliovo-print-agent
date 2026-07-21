@@ -11,6 +11,11 @@ import { logger } from "./logger";
 // (menu, staff, recent orders) changes slowly, so a relaxed cadence is fine.
 const SYNC_INTERVAL_MS = 60_000;
 
+// Tracks whether the last snapshot fetch reached the server. A false→true
+// transition means the internet just came back — drain the outbox immediately
+// instead of waiting for the next 60s tick.
+let wasOnline = false;
+
 /**
  * Agent-pull offline sync. Using the branch's Offline device key (NOT a printer
  * key, NOT a DB/admin token), the agent fetches its branch snapshot from the
@@ -32,16 +37,19 @@ async function syncOnce(): Promise<void> {
     });
   } catch (e) {
     logger.warn(`[cloud-sync] snapshot fetch failed: ${(e as Error).message}`);
+    wasOnline = false;
     return;
   }
 
   if (res.status === 401) {
     logger.warn("[cloud-sync] device key rejected (revoked or wrong branch)");
     setState("entitled", "false");
+    wasOnline = false;
     return;
   }
   if (!res.ok) {
     logger.warn(`[cloud-sync] snapshot HTTP ${res.status}`);
+    wasOnline = false;
     return;
   }
 
@@ -50,6 +58,7 @@ async function syncOnce(): Promise<void> {
     | null;
   if (!body || body.enabled === false) {
     setState("entitled", "false");
+    wasOnline = false;
     return;
   }
 
@@ -57,6 +66,11 @@ async function syncOnce(): Promise<void> {
     setState("entitled", "true");
     const upserted = applyMirror(Array.isArray(body.batches) ? body.batches : []);
     logger.info(`[cloud-sync] snapshot applied — ${upserted} rows`);
+    if (!wasOnline) {
+      wasOnline = true;
+      logger.info("[cloud-sync] internet restored — draining outbox immediately");
+      void pushOnce().catch((e) => logger.warn(`[cloud-sync] instant drain failed: ${(e as Error).message}`));
+    }
   } catch (e) {
     logger.error(`[cloud-sync] applyMirror failed: ${(e as Error).message}`);
   }
