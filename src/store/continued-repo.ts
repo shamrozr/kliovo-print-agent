@@ -11,9 +11,9 @@ export function getContinuedOrderOpsForPush(): ContinuedOp[] {
     .prepare(
       `SELECT cl.* FROM change_log cl
          JOIN orders o ON o.id = cl.entity_id
-        WHERE cl.entity_type = 'order'
-          AND cl.synced_at IS NULL
+        WHERE cl.synced_at IS NULL
           AND o.origin = 'online'
+          AND cl.op IN ('add_item','record_payment','update_status','void_item')
         ORDER BY cl.created_at ASC`
     )
     .all() as ChangeLogRow[];
@@ -26,9 +26,9 @@ export function getContinuedOpIds(): string[] {
     .prepare(
       `SELECT cl.id FROM change_log cl
          JOIN orders o ON o.id = cl.entity_id
-        WHERE cl.entity_type = 'order'
-          AND cl.synced_at IS NULL
+        WHERE cl.synced_at IS NULL
           AND o.origin = 'online'
+          AND cl.op IN ('add_item','record_payment','update_status','void_item')
         ORDER BY cl.created_at ASC`
     )
     .all() as Array<{ id: string }>;

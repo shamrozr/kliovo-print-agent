@@ -16,15 +16,13 @@ export interface ContinuedOp {
 }
 
 export function changeLogRowsToOps(rows: ChangeLogRow[]): ContinuedOp[] {
-  return rows
-    .filter((r) => r.entity_type === "order")
-    .map((r) => {
-      let data: Record<string, unknown> = {};
-      try {
-        data = JSON.parse(r.payload || "{}");
-      } catch {
-        data = {};
-      }
-      return { idempotencyId: r.id, orderId: r.entity_id, op: r.op, data };
-    });
+  return rows.map((r) => {
+    let data: Record<string, unknown> = {};
+    try {
+      data = JSON.parse(r.payload || "{}");
+    } catch {
+      data = {};
+    }
+    return { idempotencyId: r.id, orderId: r.entity_id, op: r.op, data };
+  });
 }
