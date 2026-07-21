@@ -6,7 +6,7 @@
 import { renderJob, renderContextFromPrinter } from "../render";
 import { deliverToPrinter } from "../deliver";
 import { hasPrinted, markPrinted } from "../store/print-ledger";
-import { recordResult } from "../health";
+import { recordResult, recordFallbackRoute } from "../health";
 import { logger } from "../logger";
 import { resolveKotTargets, resolveReceiptTarget, type ResolvedTarget } from "./router";
 import { buildKotInput, buildReceiptInput, kotJobId, receiptJobId } from "./render-map";
@@ -42,7 +42,7 @@ async function deliverOnce(jobId: string, target: ResolvedTarget, bytes: Buffer,
       ok: true,
     });
     if (target.fallback) {
-      logger.warn(`[fire] ${label} used FALLBACK printer ${target.printer.printerId} — routing incomplete`);
+      recordFallbackRoute({ label, printerId: target.printer.printerId });
     }
     return true;
   } catch (e) {

@@ -28,7 +28,14 @@ const MAX_EVENTS         = 25;
 const RECENT_WINDOW_MS   = 5 * 60_000;   // "yellow" lingers this long after a failure
 const NOTIFY_THROTTLE_MS = 60_000;       // at most one failure popup per printer per minute
 
+export interface FallbackEvent {
+  ts:        number;
+  label:     string;   // e.g. "KOT OFF-12/s-grill" — carries the order/station
+  printerId: string;   // the printer the ticket was diverted to
+}
+
 const events: JobEvent[] = [];
+const fallbacks: FallbackEvent[] = [];                    // recent "routing incomplete" diversions
 const lastResultByPrinter = new Map<string, boolean>();   // true = last attempt ok
 const lastFailNotifyAt    = new Map<string, number>();
 
@@ -71,6 +78,18 @@ export function recordResult(input: Omit<JobEvent, "ts">): void {
   refreshTray();
 }
 
+/**
+ * Record that a ticket was printed on a FALLBACK printer because its station
+ * had no (or no active) route. The ticket still hit paper — this is a warning
+ * that routing is misconfigured, surfaced in /status so the POS can flag it
+ * (staff otherwise would only ever see it in the log file).
+ */
+export function recordFallbackRoute(input: Omit<FallbackEvent, "ts">): void {
+  fallbacks.unshift({ ...input, ts: Date.now() });
+  if (fallbacks.length > MAX_EVENTS) fallbacks.length = MAX_EVENTS;
+  logger.warn(`[health] fallback route: ${input.label} → ${input.printerId} (routing incomplete)`);
+}
+
 function computeStatus(): TrayStatus {
   const states = Array.from(lastResultByPrinter.values());
   if (states.some((ok) => ok === false)) return "red";   // a printer is currently failing
@@ -105,5 +124,9 @@ export function getHealthSnapshot() {
     status: computeStatus(),
     printers: Array.from(lastResultByPrinter.entries()).map(([printerId, ok]) => ({ printerId, ok })),
     recent: events.slice(0, 10),
+    // True when a ticket was recently diverted to a fallback printer — a signal
+    // that a kitchen station is missing its printer route and needs fixing.
+    routingIncomplete: fallbacks.some((f) => Date.now() - f.ts < RECENT_WINDOW_MS),
+    fallbacks: fallbacks.slice(0, 10),
   };
 }
