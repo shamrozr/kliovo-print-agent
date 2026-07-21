@@ -33,6 +33,7 @@ import {
   voidItem,
   refundPayment,
 } from "./store/pos-repo";
+import { fireOnCreate, fireOnAddItem, fireReceipt } from "./print/fire";
 
 export const BRIDGE_PORT = 6310;
 
@@ -304,10 +305,23 @@ export function startBridgeServer(): http.Server {
               .then((raw) => {
                 try {
                   const b = JSON.parse(raw || "{}");
-                  if (route === "/local/pos/order/create") return okp({ order: createOrder(b) });
-                  if (route === "/local/pos/order/pay") return okp({ order: addPayment(b.orderId, b) });
+                  if (route === "/local/pos/order/create") {
+                    const order = createOrder(b) as { id: string };
+                    void fireOnCreate(order.id);
+                    return okp({ order });
+                  }
+                  if (route === "/local/pos/order/pay") {
+                    const order = addPayment(b.orderId, b) as { id: string; lastPaymentId?: string };
+                    void fireReceipt(order.id, order.lastPaymentId ?? String(b.paymentId ?? "pay"));
+                    return okp({ order });
+                  }
                   if (route === "/local/pos/order/status") return okp({ order: updateStatus(b.orderId, b.status) });
-                  if (route === "/local/pos/order/add-item") return okp({ order: addItem(b.orderId, b.item) });
+                  if (route === "/local/pos/order/add-item") {
+                    const order = addItem(b.orderId, b.item) as { id: string };
+                    void fireOnAddItem(order.id);
+                    return okp({ order });
+                  }
+                  // TODO(P1): fire void KOT
                   if (route === "/local/pos/order/void-item") return okp({ order: voidItem(b.orderId, b.itemId) });
                   if (route === "/local/pos/order/refund") {
                     const r = refundPayment(b.orderId, b.paymentId, b.reason, b.managerPin);

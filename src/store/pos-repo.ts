@@ -358,7 +358,7 @@ export function addPayment(
     logChange("payment", orderId, "record_payment", { orderId, paymentId: payId, ...payment });
   });
   tx();
-  return getOrder(orderId);
+  return { ...getOrder(orderId), lastPaymentId: payId };
 }
 
 export function updateStatus(orderId: string, status: string) {
