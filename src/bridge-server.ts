@@ -13,6 +13,7 @@ import {
   applyMirror,
   markSynced,
   setState,
+  setOwnTerminalId,
 } from "./store/repo";
 import { handleAdmsRequest } from "./biometric/adms-receiver";
 import { getQueueDepth } from "./biometric/attendance-store";
@@ -254,8 +255,17 @@ export function startBridgeServer(): http.Server {
         readBody(req)
           .then((raw) => {
             try {
-              const { secret } = JSON.parse(raw || "{}") as { secret?: string };
+              const { secret, terminalId } = JSON.parse(raw || "{}") as {
+                secret?: string;
+                terminalId?: string;
+              };
               const result = setPairingSecret(String(secret ?? ""));
+              // The web tells this machine which mirrored `terminals` row is its
+              // own identity, so offline numbering can use that terminal's unique
+              // code + per-terminal counter. Persist only on a successful pair.
+              if (result.paired && typeof terminalId === "string" && terminalId.trim()) {
+                setOwnTerminalId(terminalId);
+              }
               send(result.paired ? 200 : 409, { ok: result.paired, ...result });
             } catch (e) {
               send(500, { ok: false, error: (e as Error).message });

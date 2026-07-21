@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { getStore } from "./db";
-import { getState, setState } from "./repo";
+import { getState, setState, getOwnTerminalId } from "./repo";
+import { normalizeOrderNumbering, formatOfflineRef, type OrderNumberingConfig } from "./offline-ref";
 import {
   computeTotals,
   recomputePaymentTotals,
@@ -80,13 +81,65 @@ export function verifyManagerPin(pin: string): boolean {
   return rows.some((r) => bcrypt.compareSync(pin, r.pin_hash));
 }
 
-// ── Offline numbering: OFF-{terminalCode}-{seq} (per-terminal, collision-proof) ──
-function nextOfflineRef(terminalCode: string): string {
-  const code = (terminalCode || "T1").toUpperCase();
+// ── Offline numbering: {marker}-{terminalCode}-{seq} (per-terminal, collision-proof) ──
+//
+// Identity is the agent's own — NOT the CREATE payload. The web assigns each
+// terminal a unique `code` and mirrors the `terminals` rows down; pairing records
+// which row is this machine (settings.terminal_id). We atomically bump that row's
+// counter and format with the web's shared numbering config so offline refs match
+// online formatting. See offline-ref.ts + Kliovo-Dine/src/services/order-number.service.ts.
+
+// Load the web's mirrored order-numbering config, or null if none is warm yet.
+function loadNumberingConfig(): OrderNumberingConfig | null {
+  const d = getStore();
+  const readSetting = (k: string): unknown => {
+    const row = d.prepare("SELECT value FROM settings WHERE key = ?").get(k) as
+      | { value: string }
+      | undefined;
+    return row ? safeJson(row.value, null) : null;
+  };
+  // Accept the snake_case settings key first (matches order_config/payment_methods),
+  // then the camelCase key, then a nested branch.settings.orderNumbering blob —
+  // whichever shape the web mirror ends up writing.
+  let raw = readSetting("order_numbering") ?? readSetting("orderNumbering");
+  if (!raw) {
+    const b = d.prepare("SELECT settings FROM branch LIMIT 1").get() as { settings: string } | undefined;
+    const bs = b ? safeJson<Record<string, unknown>>(b.settings, {}) : {};
+    raw = (bs.orderNumbering as unknown) ?? null;
+  }
+  if (raw == null) return null;
+  return normalizeOrderNumbering(raw);
+}
+
+// Legacy fallback (fresh install / unpaired / terminal row not mirrored yet):
+// the original OFF-T1-NNNNN scheme on a sync_state counter, preserving continuity.
+function legacyOfflineRef(): string {
+  const code = "T1";
   const key = `seq:${code}`;
   const next = Number(getState(key) ?? "0") + 1;
   setState(key, String(next));
   return `OFF-${code}-${String(next).padStart(5, "0")}`;
+}
+
+function nextOfflineRef(): { ref: string; terminalId: string | null } {
+  const d = getStore();
+  const terminalId = getOwnTerminalId();
+  const config = loadNumberingConfig();
+
+  if (terminalId && config) {
+    // ATOMIC per-terminal counter: a single UPDATE ... RETURNING statement so two
+    // concurrent creates on the same terminal can never read the same seq.
+    const row = d
+      .prepare(
+        "UPDATE terminals SET offline_seq = offline_seq + 1, updated_at = ? WHERE id = ? RETURNING offline_seq, code"
+      )
+      .get(now(), terminalId) as { offline_seq: number; code: string | null } | undefined;
+    if (row && row.code) {
+      return { ref: formatOfflineRef(config, row.code, row.offline_seq), terminalId };
+    }
+  }
+
+  return { ref: legacyOfflineRef(), terminalId: terminalId ?? null };
 }
 
 // ── Reads ────────────────────────────────────────────────────
@@ -242,6 +295,8 @@ function recalc(orderId: string): void {
 
 // ── Order operations (each writes to the change_log outbox) ──────
 export interface CreateOrderInput {
+  /** @deprecated Ignored — the agent owns terminal identity (see nextOfflineRef).
+   *  Kept only for backward-compat with older Aster builds that still send it. */
   terminalCode?: string;
   source?: string;
   tableId?: string | null;
@@ -272,7 +327,9 @@ export interface CreateOrderInput {
 export function createOrder(input: CreateOrderInput) {
   const d = getStore();
   const orderId = id("o");
-  const ref = nextOfflineRef(input.terminalCode ?? "T1");
+  // Identity is the agent's own configured terminal — the CREATE payload no
+  // longer carries terminalCode (Aster stopped sending it).
+  const { ref, terminalId } = nextOfflineRef();
   const ts = now();
   const coreItems: CoreOrderItem[] = input.items.map((it) => ({
     unitPrice: it.unitPrice,
@@ -313,7 +370,7 @@ export function createOrder(input: CreateOrderInput) {
       sc: totals.serviceChargeAmount,
       discount: totals.discountAmount,
       total: totals.totalAmount,
-      terminal: input.terminalCode ?? "T1",
+      terminal: terminalId,
       fields: JSON.stringify(fields),
       ts,
     });
@@ -348,7 +405,7 @@ export function createOrder(input: CreateOrderInput) {
         comboPicks: it.picks ? JSON.stringify(it.picks) : null,
       });
     });
-    logChange("order", orderId, "create_order", { ...input, localId: orderId, reference: ref }, input.terminalCode);
+    logChange("order", orderId, "create_order", { ...input, localId: orderId, reference: ref }, terminalId ?? undefined);
   });
   tx();
   return getOrder(orderId);

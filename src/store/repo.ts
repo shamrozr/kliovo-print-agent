@@ -17,6 +17,36 @@ export function setState(key: string, value: string): void {
     .run(key, value);
 }
 
+// ── settings helpers (mirrored key/value; also holds this machine's identity) ──
+export function getSetting(key: string): string | null {
+  const row = getStore().prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): void {
+  getStore()
+    .prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    )
+    .run(key, value);
+}
+
+/**
+ * Which `terminals` row is *this* machine. Assigned by the web at pair time and
+ * stored here so offline numbering can look up its own unique terminal code.
+ * Returns null on a fresh/unpaired install (numbering falls back to legacy).
+ */
+export function getOwnTerminalId(): string | null {
+  const raw = getSetting("terminal_id");
+  return raw && raw.trim() ? raw : null;
+}
+
+export function setOwnTerminalId(terminalId: string): void {
+  if (terminalId && terminalId.trim()) setSetting("terminal_id", terminalId.trim());
+}
+
 /**
  * Localhost shared secret the web must present to read/write the store.
  * The secret is PROVISIONED BY THE WEB (see setPairingSecret) — the agent never
@@ -197,10 +227,26 @@ export function getOfflineOverview() {
     )
     .all();
 
-  const seqRows = d
-    .prepare("SELECT key, value FROM sync_state WHERE key LIKE 'seq:%'")
-    .all() as Array<{ key: string; value: string }>;
-  const terminals = seqRows.map((r) => ({ code: r.key.slice(4), nextSeq: Number(r.value) + 1 }));
+  // Per-terminal offline counters live in the mirrored `terminals` table now.
+  // Flag which row is this machine (set at pair time). Fall back to the legacy
+  // sync_state `seq:*` view when no terminals have been mirrored yet.
+  const ownTerminalId = getOwnTerminalId();
+  const termRows = d
+    .prepare("SELECT id, code, offline_seq FROM terminals ORDER BY code")
+    .all() as Array<{ id: string; code: string | null; offline_seq: number | null }>;
+  let terminals: Array<{ code: string; nextSeq: number; isSelf: boolean }>;
+  if (termRows.length > 0) {
+    terminals = termRows.map((t) => ({
+      code: t.code ?? t.id,
+      nextSeq: (t.offline_seq ?? 0) + 1,
+      isSelf: t.id === ownTerminalId,
+    }));
+  } else {
+    const seqRows = d
+      .prepare("SELECT key, value FROM sync_state WHERE key LIKE 'seq:%'")
+      .all() as Array<{ key: string; value: string }>;
+    terminals = seqRows.map((r) => ({ code: r.key.slice(4), nextSeq: Number(r.value) + 1, isSelf: false }));
+  }
 
   let dbBytes = 0;
   for (const suffix of ["", "-wal", "-shm"]) {
