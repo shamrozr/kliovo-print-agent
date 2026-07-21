@@ -21,6 +21,19 @@ function applySchema(conn: Database.Database): void {
   }
 }
 
+/**
+ * Column additions for already-provisioned tills. CREATE TABLE IF NOT EXISTS
+ * never alters an existing table, so new columns need a guarded ALTER. SQLite
+ * throws "duplicate column name" if it already exists — swallow that only.
+ */
+function runMigrations(conn: Database.Database): void {
+  try {
+    conn.prepare("ALTER TABLE order_items ADD COLUMN fired_at INTEGER").run();
+  } catch (e) {
+    if (!/duplicate column/i.test((e as Error).message)) throw e;
+  }
+}
+
 /** Open (or create) the encrypted local DB. Safe to call once on app ready. */
 export function initStore(): Database.Database {
   if (db) return db;
@@ -37,6 +50,7 @@ export function initStore(): Database.Database {
   // First real statement — throws "file is not a database" if the key is wrong,
   // surfacing a corrupt/replaced key file immediately instead of silently.
   applySchema(conn);
+  runMigrations(conn);
 
   db = conn;
   logger.info("[store] encrypted DB ready:", DB_PATH);

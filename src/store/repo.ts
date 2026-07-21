@@ -62,6 +62,11 @@ const MIRROR_TABLES: Record<string, string> = {
   combos: "id",
   combo_groups: "id",
   combo_group_items: "id",
+  printers: "id",
+  print_routing: "id",
+  kitchen_stations: "id",
+  print_templates: "kind",
+  branding: "id",
 };
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;

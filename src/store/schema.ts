@@ -181,6 +181,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   course        TEXT,
   station_id    TEXT,
   kitchen_status TEXT DEFAULT 'pending',
+  fired_at      INTEGER,
   sort_order    INTEGER DEFAULT 0,
   created_at    INTEGER
 );
@@ -270,4 +271,53 @@ CREATE TABLE IF NOT EXISTS printed_jobs (
   acked         INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_printed_jobs_ack ON printed_jobs(acked, printed_at)
+;
+
+CREATE TABLE IF NOT EXISTS printers (
+  id                  TEXT PRIMARY KEY,
+  name                TEXT,
+  connection          TEXT DEFAULT 'network',
+  host                TEXT,
+  port                INTEGER,
+  system_printer_name TEXT,
+  paper_width         INTEGER DEFAULT 80,
+  printer_mode        TEXT DEFAULT 'receipt',
+  label_language      TEXT,
+  label_width_mm      REAL,
+  label_height_mm     REAL,
+  gap_type            TEXT,
+  is_default          INTEGER DEFAULT 0,
+  is_active           INTEGER DEFAULT 1,
+  updated_at          INTEGER
+);
+CREATE TABLE IF NOT EXISTS print_routing (
+  id               TEXT PRIMARY KEY,
+  fulfillment_type TEXT,
+  station_id       TEXT,
+  printer_id       TEXT NOT NULL,
+  copies           INTEGER DEFAULT 1,
+  role             TEXT DEFAULT 'kot',
+  updated_at       INTEGER
+);
+CREATE TABLE IF NOT EXISTS kitchen_stations (
+  id         TEXT PRIMARY KEY,
+  name       TEXT,
+  label      TEXT,
+  sort_order INTEGER DEFAULT 0,
+  updated_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS print_templates (
+  kind          TEXT PRIMARY KEY,
+  layout_config TEXT DEFAULT '{}',
+  updated_at    INTEGER
+);
+CREATE TABLE IF NOT EXISTS branding (
+  id         TEXT PRIMARY KEY DEFAULT 'default',
+  logo_bytes BLOB,
+  name       TEXT,
+  address    TEXT,
+  phone      TEXT,
+  tax_lines  TEXT DEFAULT '[]',
+  updated_at INTEGER
+);
 `;
