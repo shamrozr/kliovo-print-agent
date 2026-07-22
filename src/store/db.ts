@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { logger } from "../logger";
 import { getOrCreateDbKey } from "./keychain";
-import { SCHEMA_SQL } from "./schema";
+import { SCHEMA_SQL, splitSqlStatements } from "./schema";
 
 let db: Database.Database | null = null;
 
@@ -13,11 +13,12 @@ const DB_PATH = path.join(DB_DIR, "dine-offline.db");
 const ONLINE_RETENTION_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
 
 function applySchema(conn: Database.Database): void {
-  // Run each DDL statement individually (the schema has no semicolons inside
-  // statements, so splitting on ";" is safe here).
-  for (const raw of SCHEMA_SQL.split(";")) {
-    const stmt = raw.trim();
-    if (stmt) conn.prepare(stmt).run();
+  // Run each DDL statement individually. splitSqlStatements strips full-line
+  // comments first, so a semicolon inside a comment can't produce a phantom
+  // comment-only statement that better-sqlite3 rejects (which used to abort the
+  // entire store init — see splitSqlStatements docs).
+  for (const stmt of splitSqlStatements(SCHEMA_SQL)) {
+    conn.prepare(stmt).run();
   }
 }
 

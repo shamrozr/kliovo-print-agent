@@ -163,8 +163,15 @@ export function applyMirror(batches: { table: string; rows: Record<string, unkno
  *  from the web. null = never synced. Distinct from last_mirror_at: it only
  *  advances when a snapshot actually carried the `users` batch. */
 export function getCredentialsSyncedAt(): number | null {
-  const v = getState("users_synced_at");
-  return v ? Number(v) : null;
+  // Tolerate an uninitialised store: /status is polled by the tray and the POS
+  // and must never throw. If offline init failed (or hasn't run yet), report
+  // "never synced" instead of crashing the request handler.
+  try {
+    const v = getState("users_synced_at");
+    return v ? Number(v) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function getStatus() {

@@ -347,3 +347,24 @@ CREATE TABLE IF NOT EXISTS applied_mutations (
   applied_at      INTEGER NOT NULL
 );
 `;
+
+/**
+ * Split the schema into individual DDL statements, ready for prepare().run().
+ *
+ * Full-line `--` comments are stripped BEFORE splitting on ";". This matters
+ * because a comment may itself contain a semicolon (e.g. "-- Brands (org-scoped
+ * in the cloud; mirrored offline)"). Splitting first would slice that comment
+ * into a comment-only fragment, and better-sqlite3 rejects a comment-with-no-
+ * statement with "The supplied SQL string contains no statements" — which
+ * aborted the WHOLE store init and silently disabled every offline feature.
+ * Inline (mid-line) comments are left intact; SQLite tolerates them fine.
+ */
+export function splitSqlStatements(sql: string): string[] {
+  return sql
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n")
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
