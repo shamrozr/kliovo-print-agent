@@ -158,13 +158,21 @@ export function getMenu() {
       available: !!it.is_available,
       modifierGroups: safeJson(it.modifier_groups, []),
       variants: safeJson(it.variants, []),
+      brandId: it.brand_id ?? null,
     };
     const arr = byCat.get(it.category_id) ?? [];
     arr.push(row);
     byCat.set(it.category_id, arr);
   }
+  const brands = (d.prepare("SELECT * FROM brands WHERE is_active = 1 ORDER BY sort_order").all() as any[]).map((b) => ({
+    id: b.id,
+    name: b.name,
+    color: b.color,
+    sortOrder: b.sort_order ?? 0,
+  }));
   return {
-    categories: cats.map((c) => ({ id: c.id, name: c.name, items: byCat.get(c.id) ?? [] })),
+    categories: cats.map((c) => ({ id: c.id, name: c.name, brandId: c.brand_id ?? null, items: byCat.get(c.id) ?? [] })),
+    brands,
   };
 }
 
@@ -212,6 +220,7 @@ export function getCombos() {
     name: c.name,
     price: c.combo_price,
     imageUrl: c.image_url,
+    brandId: c.brand_id ?? null,
     groups: (groupsStmt.all(c.id) as any[]).map((g) => ({
       id: g.id,
       label: g.label,
@@ -224,6 +233,24 @@ export function getCombos() {
       })),
     })),
   }));
+}
+
+// Resolve an order line's brand the same way the cloud does: a combo's own
+// brand wins; otherwise the menu item's brand. Read from the mirrored brand_id
+// columns so offline sales still track by brand once the order reconciles.
+function resolveLineBrandId(
+  d: ReturnType<typeof getStore>,
+  item: { comboId?: string | null; menuItemId?: string | null }
+): string | null {
+  if (item.comboId) {
+    const r = d.prepare("SELECT brand_id FROM combos WHERE id = ?").get(item.comboId) as { brand_id?: string | null } | undefined;
+    return r?.brand_id ?? null;
+  }
+  if (item.menuItemId) {
+    const r = d.prepare("SELECT brand_id FROM menu_items WHERE id = ?").get(item.menuItemId) as { brand_id?: string | null } | undefined;
+    return r?.brand_id ?? null;
+  }
+  return null;
 }
 
 // ── Payment + order config (synced from the tenant) ──────────
@@ -321,6 +348,9 @@ export interface CreateOrderInput {
     comboName?: string | null;
     comboPrice?: number | null;
     picks?: Array<{ groupId?: string; menuItemId?: string; variantId?: string | null; upcharge?: number }>;
+    /** Optional client-supplied brand; when absent the agent derives it from the
+     *  combo/menu-item brand (resolveLineBrandId). */
+    brandId?: string | null;
   }>;
 }
 
@@ -377,9 +407,9 @@ export function createOrder(input: CreateOrderInput) {
     const insItem = d.prepare(
       `INSERT INTO order_items (id, order_id, menu_item_id, variant_id, name, quantity, unit_price,
         total_price, modifiers, notes, course, station_id, kitchen_status, sort_order, created_at,
-        combo_id, combo_name, combo_price, combo_picks)
+        combo_id, combo_name, combo_price, combo_picks, brand_id)
        VALUES (@id,@orderId,@menuItemId,@variantId,@name,@qty,@unit,@total,@mods,@notes,@course,@station,'pending',@sort,@ts,
-        @comboId,@comboName,@comboPrice,@comboPicks)`
+        @comboId,@comboName,@comboPrice,@comboPicks,@brandId)`
     );
     input.items.forEach((it, i) => {
       const mods = it.modifiers ?? [];
@@ -403,6 +433,7 @@ export function createOrder(input: CreateOrderInput) {
         comboName: it.comboName ?? null,
         comboPrice: it.comboPrice ?? null,
         comboPicks: it.picks ? JSON.stringify(it.picks) : null,
+        brandId: it.brandId ?? resolveLineBrandId(d, it),
       });
     });
     logChange("order", orderId, "create_order", { ...input, localId: orderId, reference: ref }, terminalId ?? undefined);
@@ -449,6 +480,7 @@ export function addItem(
     comboName?: string | null;
     comboPrice?: number | null;
     picks?: Array<{ groupId?: string; menuItemId?: string; variantId?: string | null; upcharge?: number }>;
+    brandId?: string | null;
   }
 ) {
   const d = getStore();
@@ -458,11 +490,12 @@ export function addItem(
   const count = (d.prepare("SELECT count(*) c FROM order_items WHERE order_id=?").get(orderId) as any).c;
   const tx = d.transaction(() => {
     d.prepare(
-      `INSERT INTO order_items (id, order_id, menu_item_id, name, quantity, unit_price, total_price, modifiers, notes, station_id, kitchen_status, sort_order, created_at, combo_id, combo_name, combo_price, combo_picks)
-       VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?)`
+      `INSERT INTO order_items (id, order_id, menu_item_id, name, quantity, unit_price, total_price, modifiers, notes, station_id, kitchen_status, sort_order, created_at, combo_id, combo_name, combo_price, combo_picks, brand_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?)`
     ).run(itemId, orderId, item.menuItemId ?? null, item.name, item.quantity, item.unitPrice,
       (item.unitPrice + modTotal) * item.quantity, JSON.stringify(mods), item.notes ?? null, item.stationId ?? null, count, now(),
-      item.comboId ?? null, item.comboName ?? null, item.comboPrice ?? null, item.picks ? JSON.stringify(item.picks) : null);
+      item.comboId ?? null, item.comboName ?? null, item.comboPrice ?? null, item.picks ? JSON.stringify(item.picks) : null,
+      item.brandId ?? resolveLineBrandId(d, item));
     recalc(orderId);
     logChange("item", orderId, "add_item", { orderId, item: { ...item, id: itemId } });
   });

@@ -79,6 +79,7 @@ const MIRROR_TABLES: Record<string, string> = {
   branch: "id",
   users: "id",
   terminals: "id",
+  brands: "id",
   menu_categories: "id",
   menu_items: "id",
   tables: "id",
@@ -526,6 +527,7 @@ export function getOfflineOrdersForPush(): { orderId: string; payload: PushOrder
             picks,
             quantity: Number(it.quantity) || 1,
             stationId: it.station_id ?? null,
+            brandId: it.brand_id ?? null,
           };
         }
         return {
@@ -538,6 +540,7 @@ export function getOfflineOrdersForPush(): { orderId: string; payload: PushOrder
           notes: it.notes ?? null,
           course: it.course ?? null,
           stationId: it.station_id ?? null,
+          brandId: it.brand_id ?? null,
         };
       }),
       payments: pays

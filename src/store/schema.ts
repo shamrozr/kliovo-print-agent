@@ -44,9 +44,23 @@ CREATE TABLE IF NOT EXISTS terminals (
   updated_at    INTEGER
 );
 
+-- Brands (org-scoped in the cloud; mirrored read-only for POS brand filtering +
+-- per-line brand stamping so offline sales still track by brand).
+CREATE TABLE IF NOT EXISTS brands (
+  id            TEXT PRIMARY KEY,
+  name          TEXT,
+  slug          TEXT,
+  color         TEXT,
+  logo          TEXT,
+  sort_order    INTEGER DEFAULT 0,
+  is_active     INTEGER DEFAULT 1,
+  updated_at    INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS menu_categories (
   id            TEXT PRIMARY KEY,
   name          TEXT,
+  brand_id      TEXT,
   sort_order    INTEGER DEFAULT 0,
   is_active     INTEGER DEFAULT 1,
   updated_at    INTEGER
@@ -55,6 +69,7 @@ CREATE TABLE IF NOT EXISTS menu_categories (
 CREATE TABLE IF NOT EXISTS menu_items (
   id              TEXT PRIMARY KEY,
   category_id     TEXT,
+  brand_id        TEXT,
   name            TEXT,
   price           REAL DEFAULT 0,
   image_url       TEXT,
@@ -113,6 +128,7 @@ CREATE TABLE IF NOT EXISTS combos (
   id          TEXT PRIMARY KEY,
   name        TEXT,
   slug        TEXT,
+  brand_id    TEXT,
   combo_price REAL DEFAULT 0,
   image_url   TEXT,
   sort_order  INTEGER DEFAULT 0,
@@ -186,6 +202,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   combo_name    TEXT,
   combo_price   REAL,
   combo_picks   TEXT,
+  brand_id      TEXT,
   sort_order    INTEGER DEFAULT 0,
   created_at    INTEGER
 );

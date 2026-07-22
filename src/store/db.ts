@@ -45,6 +45,23 @@ function runMigrations(conn: Database.Database): void {
       if (!/duplicate column/i.test((e as Error).message)) throw e;
     }
   }
+
+  // Brands: the `brands` table itself is created by applySchema (CREATE TABLE IF
+  // NOT EXISTS), but brand_id columns on pre-existing tables need an explicit
+  // ALTER on already-warmed DBs. Mirror ingestion would otherwise drop the
+  // whole batch for a table whose brand_id column is missing.
+  for (const [table, col] of [
+    ["menu_categories", "brand_id TEXT"],
+    ["menu_items", "brand_id TEXT"],
+    ["combos", "brand_id TEXT"],
+    ["order_items", "brand_id TEXT"],
+  ]) {
+    try {
+      conn.prepare(`ALTER TABLE ${table} ADD COLUMN ${col}`).run();
+    } catch (e) {
+      if (!/duplicate column/i.test((e as Error).message)) throw e;
+    }
+  }
 }
 
 /** Open (or create) the encrypted local DB. Safe to call once on app ready. */
