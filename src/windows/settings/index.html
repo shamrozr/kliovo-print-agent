@@ -6,7 +6,6 @@
         content="default-src 'self'; script-src 'self'; style-src 'unsafe-inline'">
   <title>Kliovo Print Agent</title>
   <style>
-    /* Kliovo light theme — white surfaces, #22C55E accent, matches the POS. */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
            font-size: 13px; background: #f6f8fa; color: #1f2937;
@@ -70,34 +69,110 @@
     .pane.active { display: block; }
 
     /* ── Offline POS panel ──────────────────────────────────── */
-    .badges  { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-    .badge   { display: inline-flex; align-items: center; gap: 5px;
-               font-size: 11px; font-weight: 600; padding: 4px 10px;
-               border-radius: 999px; border: 1px solid #e2e8f0;
-               background: #fff; color: #475569; }
-    .badge .bdot { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
-    .badge.good  { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
-    .badge.good .bdot  { background: #22c55e; }
-    .badge.warn  { border-color: #fde68a; background: #fffbeb; color: #b45309; }
-    .badge.warn .bdot  { background: #eab308; }
+    .conn-result {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 14px; border-radius: 8px; font-size: 12px;
+      line-height: 1.45; margin-top: 8px;
+    }
+    .conn-result.success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .conn-result.error   { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .conn-result b       { font-weight: 650; }
 
-    .kpis    { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
-               margin-bottom: 12px; }
-    .kpi     { background: #fff; border: 1px solid #e8edf2; border-radius: 12px;
-               padding: 12px 10px; text-align: center; }
-    .kpi .n  { font-size: 19px; font-weight: 700; color: #0f172a; }
-    .kpi .n.alert { color: #b45309; }
-    .kpi .l  { font-size: 10px; color: #64748b; text-transform: uppercase;
-               letter-spacing: .04em; margin-top: 2px; }
+    .sync-bar {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      padding: 10px 14px; background: #fff; border: 1px solid #e8edf2;
+      border-radius: 12px;
+    }
+    .sync-pill {
+      display: inline-flex; align-items: center; padding: 4px 10px;
+      border-radius: 100px; font-size: 11px; font-weight: 600; border: 1px solid;
+    }
+    .sync-pill.good { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; }
+    .sync-pill.warn { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+    .sync-pill.bad  { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+    .sync-actions { margin-left: auto; }
 
-    .ucount  { font-size: 11px; color: #94a3b8; margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
-    table.tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .sync-log {
+      display: flex; flex-direction: column; gap: 2px; margin-top: 8px;
+      padding-top: 8px; border-top: 1px solid #f1f5f9;
+    }
+    .sync-entry {
+      display: flex; align-items: center; gap: 8px; font-size: 11px;
+      color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      padding: 2px 0;
+    }
+    .sync-entry .ts { min-width: 54px; }
+    .sync-entry .result { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; font-weight: 500; }
+    .sync-entry .result-ok { color: #15803d; }
+    .sync-entry .result-fail { color: #991b1b; }
+
+    /* ── Inventory rows ────────────────────────────────────── */
+    .inv-card { background: #fff; border: 1px solid #e8edf2; border-radius: 12px; overflow: hidden; }
+    .inv-row {
+      display: flex; align-items: center; padding: 10px 14px; gap: 10px;
+      border-bottom: 1px solid #f1f5f9; cursor: pointer;
+    }
+    .inv-row:hover { background: #fafbfc; }
+    .inv-row:last-child { border-bottom: none; }
+    .inv-icon {
+      width: 28px; height: 28px; border-radius: 6px; display: flex;
+      align-items: center; justify-content: center; font-size: 11px;
+      font-weight: 700; flex-shrink: 0; background: #f1f5f9; color: #64748b;
+    }
+    .inv-icon.warn { background: #fffbeb; color: #b45309; }
+    .inv-info { flex: 1; min-width: 0; }
+    .inv-label { font-size: 12.5px; font-weight: 600; color: #1f2937; }
+    .inv-detail { font-size: 11px; color: #94a3b8; white-space: nowrap;
+                  overflow: hidden; text-overflow: ellipsis; }
+    .inv-count { font-size: 14px; font-weight: 700; color: #1f2937;
+                 font-variant-numeric: tabular-nums; min-width: 24px; text-align: right; }
+    .inv-count.warn { color: #b45309; }
+    .inv-chevron { color: #94a3b8; font-size: 11px; margin-left: 2px; }
+
+    .inv-expand {
+      display: none; padding: 4px 14px 10px 52px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .inv-expand.open { display: block; }
+    .inv-expand .sub-item {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11px; color: #475569; padding: 3px 6px; border-radius: 4px;
+    }
+    .inv-expand .sub-item:hover { background: #f8fafc; }
+    .inv-expand .sub-val { font-variant-numeric: tabular-nums; color: #94a3b8; font-weight: 500; }
+
+    .tag {
+      display: inline-flex; padding: 2px 6px; border-radius: 4px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .tag-green { background: #f0fdf4; color: #15803d; }
+    .tag-amber { background: #fffbeb; color: #b45309; }
+    .tag-blue  { background: #dbeafe; color: #1d4ed8; }
+
+    table.tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
     table.tbl th { text-align: left; font-size: 10px; text-transform: uppercase;
                    letter-spacing: .04em; color: #94a3b8; font-weight: 600;
-                   padding: 6px 6px; border-bottom: 1px solid #e2e8f0; }
-    table.tbl td { padding: 8px 6px; border-bottom: 1px solid #f1f5f9;
-                   color: #1f2937; }
+                   padding: 4px 6px; border-bottom: 1px solid #e2e8f0; }
+    table.tbl td { padding: 5px 6px; border-bottom: 1px solid #f1f5f9; color: #475569; }
     table.tbl tr:last-child td { border-bottom: none; }
+
+    .warn-banner {
+      display: flex; gap: 8px; padding: 10px 12px;
+      background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+      font-size: 11.5px; color: #92400e; line-height: 1.45;
+    }
+
+    .storage-row {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11px; color: #94a3b8; padding: 3px 0;
+    }
+    .storage-row .val { color: #475569; font-weight: 500; }
+    .storage-path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px; color: #94a3b8; word-break: break-all;
+      margin-top: 6px; padding-top: 6px; border-top: 1px solid #f1f5f9;
+    }
+
     .pill    { font-size: 10px; font-weight: 600; padding: 2px 8px;
                border-radius: 999px; background: #f1f5f9; color: #475569; }
     .pill.role { background: #dbeafe; color: #1d4ed8; }
@@ -112,15 +187,17 @@
     .hint b  { color: #0f172a; }
     .meta    { font-size: 11px; color: #94a3b8; display: flex; justify-content: space-between;
                margin-top: 6px; }
+    .ucount  { font-size: 11px; color: #94a3b8; margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
   </style>
 </head>
 <body>
   <h1>Kliovo Print Agent</h1>
 
   <div class="tabs">
-    <button class="tab active" id="tabPrintBtn" data-pane="print">Printing</button>
-    <button class="tab" id="tabOfflineBtn" data-pane="offline">Offline POS</button>
-    <button class="tab" id="tabBioBtn" data-pane="biometric">Biometric</button>
+    <button class="tab active" data-pane="print">Printing</button>
+    <button class="tab" data-pane="offline">Offline POS</button>
+    <button class="tab" data-pane="biometric">Biometric</button>
+    <button class="tab" data-pane="tax">Tax</button>
   </div>
 
   <!-- ── Printing pane ──────────────────────────────────────── -->
@@ -129,7 +206,7 @@
     <div class="health" id="health">
       <div class="health-head">
         <span class="dot" id="healthDot"></span>
-        <span class="lbl" id="healthLabel">Loading…</span>
+        <span class="lbl" id="healthLabel">Loading...</span>
       </div>
       <div id="healthPrinters"></div>
       <div class="recent" id="healthRecent"></div>
@@ -150,65 +227,51 @@
 
   <!-- ── Offline POS pane ───────────────────────────────────── -->
   <div class="pane" id="pane-offline">
-    <label for="offlineDeviceKey">Offline Device Key</label>
-    <div class="row">
-      <input type="password" id="offlineDeviceKey" placeholder="dok_…  (from Dine → Settings → Offline POS)">
-      <button class="primary" id="saveKeyBtn">Save</button>
+    <!-- Device Key -->
+    <div class="section">Device Key</div>
+    <div class="card">
+      <div class="row" style="margin-top:0;">
+        <input type="password" id="offlineDeviceKey" placeholder="dok_...  (from Dine > Settings > Offline POS)">
+        <button class="primary" id="saveKeyBtn">Save</button>
+      </div>
+      <div id="connResult"></div>
     </div>
-    <div class="status" id="keyStatus" style="margin-bottom:6px;">Paste this branch's key so the agent can pull offline data on its own.</div>
 
-    <label for="taxRelayKey" style="margin-top:10px;">Tax Relay Key</label>
-    <div class="row">
-      <input type="password" id="taxRelayKey" placeholder="trk_…  (from Dine → Settings → Tax)">
-      <button class="primary" id="saveTaxRelayBtn">Save</button>
-    </div>
-    <div class="status" id="taxRelayStatus" style="margin-bottom:6px;">Lets this agent submit fiscal invoices (PRA/FBR) from the restaurant's Pakistani IP.</div>
+    <!-- Sync Status -->
+    <div id="syncBar" style="display:none"></div>
 
-    <div class="section">Offline Status</div>
-    <div class="badges" id="offBadges"></div>
+    <!-- Data Inventory -->
+    <div class="section">Cached Data</div>
+    <div class="inv-card" id="invCard"></div>
 
-    <div class="section">Stored Data</div>
-    <div class="kpis" id="offKpis"></div>
-
-    <div class="section" style="display:flex;align-items:center">
-      Cached Logins <span class="ucount" id="offUserCount"></span>
-    </div>
-    <div class="card" id="offUsersCard"></div>
-
-    <div class="section">Recent Orders</div>
-    <div class="card" id="offOrdersCard"></div>
-
+    <!-- Storage -->
     <div class="section">Storage</div>
     <div class="card" id="offStorageCard"></div>
   </div>
 
   <!-- ── Biometric pane ────────────────────────────────────── -->
   <div class="pane" id="pane-biometric">
-
-    <!-- Sync config -->
     <div class="section">Attendance Device Key</div>
     <div class="card">
-      <label for="bioKey">Device Key <span style="color:#94a3b8;font-weight:400;text-transform:none">(from Dine → Settings → HR → Attendance)</span></label>
-      <input type="password" id="bioKey" placeholder="atk_…">
-      <div class="status" id="bioKeyHint" style="margin-top:6px">Scoped to this one branch only — separate from printing and offline POS keys.</div>
+      <label for="bioKey">Device Key <span style="color:#94a3b8;font-weight:400;text-transform:none">(from Dine > Settings > HR > Attendance)</span></label>
+      <input type="password" id="bioKey" placeholder="atk_...">
+      <div class="status" id="bioKeyHint" style="margin-top:6px">Scoped to this one branch only.</div>
       <div class="actions" style="margin-top:12px">
         <button class="primary" id="bioSaveConfigBtn">Save Key</button>
         <span class="status" id="bioConfigStatus"></span>
       </div>
     </div>
 
-    <!-- Sync status -->
     <div class="section">Sync Status</div>
     <div class="card" id="bioStatusCard">
       <div style="display:flex;gap:16px;flex-wrap:wrap">
-        <div class="kpi"><div class="n" id="bioQueueN">—</div><div class="l">Queued</div></div>
-        <div class="kpi"><div class="n" id="bioScanN" style="font-size:12px;padding-top:4px">—</div><div class="l">Last Scan</div></div>
-        <div class="kpi"><div class="n" id="bioSyncN" style="font-size:12px;padding-top:4px">—</div><div class="l">Last Push</div></div>
+        <div class="kpi"><div class="n" id="bioQueueN">--</div><div class="l">Queued</div></div>
+        <div class="kpi"><div class="n" id="bioScanN" style="font-size:12px;padding-top:4px">--</div><div class="l">Last Scan</div></div>
+        <div class="kpi"><div class="n" id="bioSyncN" style="font-size:12px;padding-top:4px">--</div><div class="l">Last Push</div></div>
       </div>
       <div id="bioDeviceStatuses" style="margin-top:10px"></div>
     </div>
 
-    <!-- Devices -->
     <div class="section">ZKTeco Devices</div>
     <div id="bioDevices"></div>
     <div class="card" style="border-style:dashed">
@@ -223,11 +286,10 @@
       </div>
     </div>
 
-    <!-- Staff sync -->
     <div class="section">Staff Sync</div>
     <div class="hint" style="margin-bottom:12px">
       <b>How it works:</b> Click "Sync Staff" to push your team's names and PIN numbers from Dine to the device.
-      After syncing, each staff member must <b>walk to the K70 and enroll their fingerprint physically</b> — fingerprint data can never be uploaded remotely.
+      After syncing, each staff member must <b>walk to the K70 and enroll their fingerprint physically</b>.
     </div>
     <div class="card">
       <label for="bioSyncDevice">Target Device</label>
@@ -239,8 +301,21 @@
       <div class="status" id="bioSyncStatus" style="margin-top:8px"></div>
       <div id="bioSyncResults" style="margin-top:8px"></div>
     </div>
-
     <div style="height:20px"></div>
+  </div>
+
+  <!-- ── Tax pane ──────────────────────────────────────────── -->
+  <div class="pane" id="pane-tax">
+    <div class="section">Tax Relay Key</div>
+    <div class="card">
+      <div class="row" style="margin-top:0;">
+        <input type="password" id="taxRelayKey" placeholder="trk_...  (from Dine > Settings > Tax)">
+        <button class="primary" id="saveTaxRelayBtn">Save</button>
+      </div>
+      <div class="status" id="taxRelayStatus" style="margin-top:6px;">
+        Lets this agent submit fiscal invoices (PRA/FBR) from the restaurant's Pakistani IP.
+      </div>
+    </div>
   </div>
 
   <script src="renderer.js"></script>

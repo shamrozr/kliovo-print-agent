@@ -16,7 +16,6 @@ function buildPrinterCard(printer, index) {
   const connType = printer.connection === "system" ? "system" : "network";
   const printerMode = printer.printerMode === "label" ? "label" : "receipt";
 
-  // ── Mode badge (Receipt / Label) in card header ────────────
   const header = document.createElement("div");
   header.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:6px;";
   const headerName = document.createElement("div");
@@ -39,7 +38,6 @@ function buildPrinterCard(printer, index) {
   nameInput.dataset.field = "name";
   nameInput.addEventListener("input", function() { setText(headerName, nameInput.value || "Untitled printer"); });
 
-  // ── Connection type ────────────────────────────────────────
   const connLabel = document.createElement("label");
   setText(connLabel, "Connection");
   const connSelect = document.createElement("select");
@@ -56,7 +54,6 @@ function buildPrinterCard(printer, index) {
     renderPrinters();
   });
 
-  // ── Network fields (IP + Port) ─────────────────────────────
   const row = document.createElement("div");
   row.className = "row";
 
@@ -83,7 +80,6 @@ function buildPrinterCard(printer, index) {
 
   row.append(ipWrap, portWrap);
 
-  // ── System (USB) fields — printer queue name + detect list ─
   const sysWrap = document.createElement("div");
   const sysLabel = document.createElement("label");
   setText(sysLabel, "Windows / System Printer");
@@ -139,7 +135,6 @@ function buildPrinterCard(printer, index) {
     cfg.printers[index].paperWidth = Number(widthSelect.value);
   });
 
-  // ── Printer Mode (Receipt / Label) ─────────────────────────
   const modeLabel = document.createElement("label");
   setText(modeLabel, "Printer Mode");
   const modeSelect = document.createElement("select");
@@ -152,7 +147,6 @@ function buildPrinterCard(printer, index) {
     modeSelect.appendChild(o);
   });
 
-  // ── Label-only fields (width / height / gap type) ──────────
   const labelWrap = document.createElement("div");
   labelWrap.style.cssText = "display:" + (printerMode === "label" ? "block" : "none") + ";margin-top:8px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;";
 
@@ -212,8 +206,6 @@ function buildPrinterCard(printer, index) {
     cfg.printers[index].gapType = gapSelect.value;
   });
 
-  // Command language the label printer speaks — ESC/POS won't work on any
-  // label printer, so let the operator pick TSPL / ZPL / EPL.
   const langLabel = document.createElement("label");
   setText(langLabel, "Label Command Language");
   const langSelect = document.createElement("select");
@@ -338,33 +330,15 @@ function init() {
 
 // Save the tax relay key (same config blob).
 document.getElementById("saveTaxRelayBtn").addEventListener("click", function() {
-  const st = document.getElementById("taxRelayStatus");
+  var st = document.getElementById("taxRelayStatus");
   cfg.taxRelayKey = document.getElementById("taxRelayKey").value.trim();
   st.className = "status";
   st.textContent = "Saving…";
   window.agent.saveConfig(cfg).then(function() {
     st.className = "status ok";
     st.textContent = cfg.taxRelayKey
-      ? "Saved ✓ — the agent will now relay fiscal invoices for this branch."
+      ? "Saved — the agent will now relay fiscal invoices for this branch."
       : "Key cleared.";
-  }).catch(function(e) {
-    st.className = "status err";
-    st.textContent = e.message;
-  });
-});
-
-// Save the offline device key (kept in the same config as printers/serverUrl).
-document.getElementById("saveKeyBtn").addEventListener("click", function() {
-  const st = document.getElementById("keyStatus");
-  cfg.offlineDeviceKey = document.getElementById("offlineDeviceKey").value.trim();
-  st.className = "status";
-  st.textContent = "Saving…";
-  window.agent.saveConfig(cfg).then(function() {
-    st.className = "status ok";
-    st.textContent = cfg.offlineDeviceKey
-      ? "Saved ✓ — pulling offline data… (give it a few seconds, then check below)"
-      : "Key cleared.";
-    setTimeout(pollOffline, 6000);
   }).catch(function(e) {
     st.className = "status err";
     st.textContent = e.message;
@@ -373,7 +347,7 @@ document.getElementById("saveKeyBtn").addEventListener("click", function() {
 
 // ── Live print-status panel ─────────────────────────────────
 function nameForPrinterId(printerId) {
-  const p = (cfg.printers || []).find(function(x) { return x.printerId === printerId; });
+  var p = (cfg.printers || []).find(function(x) { return x.printerId === printerId; });
   return (p && p.name) ? p.name : printerId;
 }
 
@@ -383,36 +357,35 @@ function clockStr(ts) {
 }
 
 function renderHealth(snap) {
-  const dot   = document.getElementById("healthDot");
-  const label = document.getElementById("healthLabel");
-  const pls   = document.getElementById("healthPrinters");
-  const rec   = document.getElementById("healthRecent");
+  var dot   = document.getElementById("healthDot");
+  var label = document.getElementById("healthLabel");
+  var pls   = document.getElementById("healthPrinters");
+  var rec   = document.getElementById("healthRecent");
 
-  const status = (snap && snap.status) || "green";
+  var status = (snap && snap.status) || "green";
   dot.className = "dot " + status;
   label.textContent =
     status === "red"    ? "A printer is currently failing" :
     status === "yellow" ? "Recent print issue — watching" :
                           "Printing OK";
 
-  // Per-printer last result
   while (pls.firstChild) pls.removeChild(pls.firstChild);
-  const printers = (snap && snap.printers) || [];
+  var printers = (snap && snap.printers) || [];
   if (printers.length === 0) {
-    const e = document.createElement("div");
+    var e = document.createElement("div");
     e.className = "empty";
     e.textContent = "No print activity yet.";
     pls.appendChild(e);
   } else {
     printers.forEach(function(p) {
-      const row = document.createElement("div");
+      var row = document.createElement("div");
       row.className = "hprinter";
-      const d = document.createElement("span");
+      var d = document.createElement("span");
       d.className = "dot " + (p.ok ? "green" : "red");
-      const nm = document.createElement("span");
+      var nm = document.createElement("span");
       nm.className = "nm";
       nm.textContent = nameForPrinterId(p.printerId);
-      const det = document.createElement("span");
+      var det = document.createElement("span");
       det.className = "det";
       det.textContent = p.ok ? "last job OK" : "last job FAILED";
       row.append(d, nm, det);
@@ -420,14 +393,13 @@ function renderHealth(snap) {
     });
   }
 
-  // Recent activity (last few events)
   while (rec.firstChild) rec.removeChild(rec.firstChild);
-  const events = (snap && snap.recent) || [];
+  var events = (snap && snap.recent) || [];
   events.slice(0, 6).forEach(function(ev) {
-    const line = document.createElement("div");
+    var line = document.createElement("div");
     line.className = "ev";
-    const mark = ev.ok ? "✓" : "✗";
-    const who  = nameForPrinterId(ev.printerId);
+    var mark = ev.ok ? "✓" : "✗";
+    var who  = nameForPrinterId(ev.printerId);
     line.textContent = clockStr(ev.ts) + "  " + mark + " " + ev.kind + " → " + who +
       (ev.ok ? "" : ("  (" + (ev.error || "error") + ")"));
     rec.appendChild(line);
@@ -438,7 +410,6 @@ function pollHealth() {
   window.agent.getStatus().then(renderHealth).catch(function() {});
 }
 
-// Detect OS-installed printers first (for the USB picker), then render.
 window.agent.listPrinters().then(function(names) {
   systemPrinters = Array.isArray(names) ? names : [];
   init();
@@ -450,28 +421,30 @@ window.agent.getVersion().then(function(v) {
   document.title = "Kliovo Print Agent v" + v;
 });
 
-// Live status panel — poll the health snapshot every few seconds.
 pollHealth();
 setInterval(pollHealth, 3000);
 
 // ── Tabs ────────────────────────────────────────────────────
-let activePane = "print";
+var activePane = "print";
 function selectTab(pane) {
   activePane = pane;
   document.querySelectorAll(".tab").forEach(function(b) {
     b.classList.toggle("active", b.dataset.pane === pane);
   });
-  document.getElementById("pane-print").classList.toggle("active", pane === "print");
-  document.getElementById("pane-offline").classList.toggle("active", pane === "offline");
-  document.getElementById("pane-biometric").classList.toggle("active", pane === "biometric");
-  if (pane === "offline") pollOffline();
+  document.querySelectorAll(".pane").forEach(function(p) {
+    p.classList.toggle("active", p.id === "pane-" + pane);
+  });
+  if (pane === "offline") refreshOfflineTab();
   if (pane === "biometric") { initBiometric(); pollBiometricStatus(); }
 }
 document.querySelectorAll(".tab").forEach(function(b) {
   b.addEventListener("click", function() { selectTab(b.dataset.pane); });
 });
 
-// ── Offline POS panel ───────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// ── OFFLINE POS TAB ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
 function fmtBytes(n) {
   if (!n) return "0 B";
   if (n < 1024) return n + " B";
@@ -479,150 +452,395 @@ function fmtBytes(n) {
   return (n / 1048576).toFixed(1) + " MB";
 }
 function fmtMoney(amount) {
-  // Offline store amounts are in RUPEES (snapshot sends Decimal rupees; offline
-  // orders compute in rupees too), so don't divide by 100.
   return "Rs " + Math.round(Number(amount) || 0).toLocaleString();
 }
 function ago(ts) {
   if (!ts) return "never";
-  const s = Math.floor((Date.now() - ts) / 1000);
+  var s = Math.floor((Date.now() - ts) / 1000);
   if (s < 60) return s + "s ago";
   if (s < 3600) return Math.floor(s / 60) + "m ago";
   if (s < 86400) return Math.floor(s / 3600) + "h ago";
   return Math.floor(s / 86400) + "d ago";
 }
-function badge(text, kind) {
-  const b = document.createElement("span");
-  b.className = "badge" + (kind ? " " + kind : "");
-  const d = document.createElement("span");
-  d.className = "bdot";
-  const t = document.createElement("span");
-  t.textContent = text;
-  b.append(d, t);
-  return b;
-}
 function pill(text, kind) {
-  const p = document.createElement("span");
+  var p = document.createElement("span");
   p.className = "pill" + (kind ? " " + kind : "");
   p.textContent = text;
   return p;
 }
-function kpi(n, label, alert) {
-  const w = document.createElement("div");
-  w.className = "kpi";
-  const nn = document.createElement("div");
-  nn.className = "n" + (alert && Number(n) > 0 ? " alert" : "");
-  nn.textContent = String(n);
-  const ll = document.createElement("div");
-  ll.className = "l";
-  ll.textContent = label;
-  w.append(nn, ll);
-  return w;
-}
-// Build the "no staff cached" guidance out of DOM nodes (no innerHTML).
-function buildEmptyLoginHint() {
-  const h = document.createElement("div");
-  h.className = "hint";
-  function strong(t) { const s = document.createElement("b"); s.textContent = t; return s; }
-  h.append(
-    strong("No staff cached yet. "),
-    document.createTextNode("Offline login is primed from the web while online. Have an "),
-    strong("owner/admin sign in to Dine on this computer once"),
-    document.createTextNode(" to cache all staff at once — or each staff member can sign in to the web here once to cache their own login. After that they can log in to the offline POS during an outage.")
-  );
-  return h;
-}
 
-function renderOffline(res) {
-  const badges  = document.getElementById("offBadges");
-  const kpis    = document.getElementById("offKpis");
-  const uCard   = document.getElementById("offUsersCard");
-  const uCount  = document.getElementById("offUserCount");
-  const oCard   = document.getElementById("offOrdersCard");
-  const sCard   = document.getElementById("offStorageCard");
-  [badges, kpis, uCard, oCard, sCard].forEach(function(n) { while (n.firstChild) n.removeChild(n.firstChild); });
-  uCount.textContent = "";
+// ── Device Key — save + verify ─────────────────────────────────
+document.getElementById("saveKeyBtn").addEventListener("click", function() {
+  var btn = document.getElementById("saveKeyBtn");
+  var connResult = document.getElementById("connResult");
+  var key = document.getElementById("offlineDeviceKey").value.trim();
 
-  if (!res || !res.ok) {
-    const e = document.createElement("div");
-    e.className = "empty";
-    e.textContent = res && res.error ? ("Offline store not ready — " + res.error) : "Offline store not initialised.";
-    badges.appendChild(e);
+  btn.disabled = true;
+  btn.textContent = "Verifying…";
+  while (connResult.firstChild) connResult.removeChild(connResult.firstChild);
+
+  cfg.offlineDeviceKey = key;
+  window.agent.saveConfig(cfg).then(function() {
+    if (!key) {
+      btn.disabled = false;
+      btn.textContent = "Save";
+      var box = document.createElement("div");
+      box.className = "conn-result error";
+      box.textContent = "Key cleared.";
+      connResult.appendChild(box);
+      return;
+    }
+    return window.agent.verifyDeviceKey(key);
+  }).then(function(r) {
+    btn.disabled = false;
+    btn.textContent = "Save";
+    if (!r) return;
+
+    var box = document.createElement("div");
+    if (r.valid && r.entitled) {
+      box.className = "conn-result success";
+      var lines = [];
+      if (r.branchName) lines.push(r.branchName);
+      if (r.branchAddress) lines.push(r.branchAddress);
+      if (r.branchPhone) lines.push(r.branchPhone);
+      var b = document.createElement("b");
+      b.textContent = "Connected";
+      box.appendChild(b);
+      if (lines.length) {
+        box.appendChild(document.createTextNode(" — " + lines.join(" / ")));
+      }
+    } else if (r.valid && r.entitled === false) {
+      box.className = "conn-result error";
+      box.textContent = "Key is valid but Offline POS is not enabled for this branch. Enable it in Dine > Settings > Offline POS.";
+    } else {
+      box.className = "conn-result error";
+      box.textContent = r.error || "Verification failed";
+    }
+    connResult.appendChild(box);
+
+    // After successful verification, refresh the data inventory
+    if (r.valid && r.entitled) {
+      setTimeout(loadOfflineData, 2000);
+    }
+  }).catch(function(e) {
+    btn.disabled = false;
+    btn.textContent = "Save";
+    var box = document.createElement("div");
+    box.className = "conn-result error";
+    box.textContent = e.message;
+    connResult.appendChild(box);
+  });
+});
+
+// ── Sync bar + log rendering ───────────────────────────────────
+function renderSyncBar(overview, syncLog) {
+  var bar = document.getElementById("syncBar");
+  while (bar.firstChild) bar.removeChild(bar.firstChild);
+
+  if (!overview || !overview.ok) {
+    bar.style.display = "none";
     return;
   }
-  const d = res.data;
+  bar.style.display = "block";
 
-  // Status badges
-  badges.appendChild(badge(d.entitled ? "Offline enabled" : "Not entitled", d.entitled ? "good" : "warn"));
-  badges.appendChild(badge(d.paired ? "Paired with web" : "Not paired yet", d.paired ? "good" : "warn"));
-  badges.appendChild(badge("Last sync " + ago(d.lastMirrorAt), d.lastMirrorAt ? "good" : "warn"));
+  var d = overview.data;
+  var wrapper = document.createElement("div");
+  wrapper.className = "sync-bar";
 
-  // KPIs
-  kpis.appendChild(kpi(d.users.length, "Logins"));
-  kpis.appendChild(kpi(d.counts.menuItems ?? 0, "Menu items"));
-  kpis.appendChild(kpi(d.counts.combos ?? 0, "Combos"));
-  kpis.appendChild(kpi(d.counts.unsyncedOrders, "Unsynced", true));
+  // Entitled pill
+  var ePill = document.createElement("span");
+  ePill.className = "sync-pill " + (d.entitled ? "good" : "bad");
+  ePill.textContent = d.entitled ? "Entitled" : "Not entitled";
+  wrapper.appendChild(ePill);
 
-  // Cached logins
-  uCount.textContent = d.users.length + " staff can log in offline";
-  if (d.users.length === 0) {
-    uCard.appendChild(buildEmptyLoginHint());
-  } else {
-    const tbl = document.createElement("table");
+  // Paired pill
+  var pPill = document.createElement("span");
+  pPill.className = "sync-pill " + (d.paired ? "good" : "warn");
+  pPill.textContent = d.paired ? "Paired" : "Not paired";
+  wrapper.appendChild(pPill);
+
+  // Last sync pill
+  var sPill = document.createElement("span");
+  sPill.className = "sync-pill " + (d.lastMirrorAt ? "good" : "warn");
+  sPill.textContent = "Synced " + ago(d.lastMirrorAt);
+  wrapper.appendChild(sPill);
+
+  // Unsynced orders pill (if any)
+  if (d.counts.unsyncedOrders > 0) {
+    var uPill = document.createElement("span");
+    uPill.className = "sync-pill bad";
+    uPill.textContent = d.counts.unsyncedOrders + " unsynced";
+    wrapper.appendChild(uPill);
+  }
+
+  // Sync Now button
+  var actionsDiv = document.createElement("div");
+  actionsDiv.className = "sync-actions";
+  var syncBtn = document.createElement("button");
+  syncBtn.className = "primary";
+  syncBtn.textContent = "Sync Now";
+  syncBtn.addEventListener("click", function() {
+    syncBtn.disabled = true;
+    syncBtn.textContent = "Syncing…";
+    window.agent.syncNow().then(function(r) {
+      syncBtn.disabled = false;
+      syncBtn.textContent = "Sync Now";
+      refreshOfflineTab();
+    }).catch(function() {
+      syncBtn.disabled = false;
+      syncBtn.textContent = "Sync Now";
+    });
+  });
+  actionsDiv.appendChild(syncBtn);
+  wrapper.appendChild(actionsDiv);
+
+  bar.appendChild(wrapper);
+
+  // Sync log
+  if (syncLog && syncLog.length > 0) {
+    var logDiv = document.createElement("div");
+    logDiv.className = "sync-log";
+    syncLog.slice(0, 6).forEach(function(entry) {
+      var line = document.createElement("div");
+      line.className = "sync-entry";
+      var ts = document.createElement("span");
+      ts.className = "ts";
+      ts.textContent = clockStr(entry.ts);
+      var result = document.createElement("span");
+      result.className = "result " + (entry.ok ? "result-ok" : "result-fail");
+      result.textContent = entry.ok ? "OK" : "FAIL";
+      var msg = document.createElement("span");
+      msg.textContent = entry.message;
+      line.append(ts, result, msg);
+      logDiv.appendChild(line);
+    });
+    bar.appendChild(logDiv);
+  }
+}
+
+// ── Data inventory rendering ───────────────────────────────────
+
+// Track which rows are expanded
+var expandedRows = {};
+
+function toggleExpand(key) {
+  expandedRows[key] = !expandedRows[key];
+  var el = document.getElementById("inv-expand-" + key);
+  if (el) el.classList.toggle("open", !!expandedRows[key]);
+  var chev = document.getElementById("inv-chev-" + key);
+  if (chev) chev.textContent = expandedRows[key] ? "▼" : "▶";
+}
+
+function invRow(key, label, count, detail, expandContent, warn) {
+  var frag = document.createDocumentFragment();
+
+  var row = document.createElement("div");
+  row.className = "inv-row";
+  row.addEventListener("click", function() { toggleExpand(key); });
+
+  var icon = document.createElement("div");
+  icon.className = "inv-icon" + (warn ? " warn" : "");
+  icon.textContent = label.substring(0, 2).toUpperCase();
+
+  var info = document.createElement("div");
+  info.className = "inv-info";
+  var lbl = document.createElement("div");
+  lbl.className = "inv-label";
+  lbl.textContent = label;
+  info.appendChild(lbl);
+  if (detail) {
+    var det = document.createElement("div");
+    det.className = "inv-detail";
+    det.textContent = detail;
+    info.appendChild(det);
+  }
+
+  var cnt = document.createElement("div");
+  cnt.className = "inv-count" + (warn ? " warn" : "");
+  cnt.textContent = String(count);
+
+  var chev = document.createElement("div");
+  chev.className = "inv-chevron";
+  chev.id = "inv-chev-" + key;
+  chev.textContent = expandedRows[key] ? "▼" : "▶";
+
+  row.append(icon, info, cnt, chev);
+  frag.appendChild(row);
+
+  if (expandContent) {
+    var expand = document.createElement("div");
+    expand.className = "inv-expand" + (expandedRows[key] ? " open" : "");
+    expand.id = "inv-expand-" + key;
+    if (typeof expandContent === "function") {
+      expandContent(expand);
+    } else {
+      expand.appendChild(expandContent);
+    }
+    frag.appendChild(expand);
+  }
+
+  return frag;
+}
+
+function subItem(label, value) {
+  var div = document.createElement("div");
+  div.className = "sub-item";
+  var l = document.createElement("span");
+  l.textContent = label;
+  var v = document.createElement("span");
+  v.className = "sub-val";
+  v.textContent = String(value);
+  div.append(l, v);
+  return div;
+}
+
+function renderInventory(d) {
+  var card = document.getElementById("invCard");
+  while (card.firstChild) card.removeChild(card.firstChild);
+
+  if (!d) {
+    var empty = document.createElement("div");
+    empty.className = "inv-row";
+    empty.style.cursor = "default";
+    var emptyInfo = document.createElement("div");
+    emptyInfo.className = "inv-info";
+    var emptyLbl = document.createElement("div");
+    emptyLbl.className = "inv-label";
+    emptyLbl.style.color = "#94a3b8";
+    emptyLbl.textContent = "No data cached — save a device key and sync first";
+    emptyInfo.appendChild(emptyLbl);
+    empty.appendChild(emptyInfo);
+    card.appendChild(empty);
+    return;
+  }
+
+  // 1. Menu
+  var menuCats = d.menuCategories || [];
+  var menuCount = d.counts.menuItems || 0;
+  var menuDetail = menuCats.length + " categories";
+  card.appendChild(invRow("menu", "Menu", menuCount, menuDetail, function(el) {
+    if (menuCats.length === 0) {
+      el.appendChild(subItem("No categories cached", ""));
+      return;
+    }
+    menuCats.forEach(function(cat) {
+      el.appendChild(subItem(cat.name, cat.itemCount + " items"));
+    });
+  }));
+
+  // 2. Combos
+  var combos = d.comboDetails || [];
+  var comboCount = d.counts.combos || 0;
+  card.appendChild(invRow("combos", "Combos", comboCount,
+    (d.counts.comboGroups || 0) + " groups, " + (d.counts.comboGroupItems || 0) + " group items",
+    function(el) {
+      if (combos.length === 0) {
+        el.appendChild(subItem("No combos cached", ""));
+        return;
+      }
+      combos.forEach(function(c) {
+        var label = c.name + (c.isActive ? "" : " (inactive)");
+        el.appendChild(subItem(label, "Rs " + Math.round(c.comboPrice || 0)));
+      });
+    }
+  ));
+
+  // 3. Tables
+  var tables = d.tableDetails || [];
+  var tableCount = d.counts.tables || 0;
+  card.appendChild(invRow("tables", "Tables", tableCount, null, function(el) {
+    if (tables.length === 0) {
+      el.appendChild(subItem("No tables cached", ""));
+      return;
+    }
+    tables.forEach(function(t) {
+      var loc = t.locationName ? " (" + t.locationName + ")" : "";
+      el.appendChild(subItem(t.name + loc, t.status || "available"));
+    });
+  }));
+
+  // 4. Staff (users)
+  var users = d.users || [];
+  card.appendChild(invRow("staff", "Staff", users.length, null, function(el) {
+    if (users.length === 0) {
+      var hint = document.createElement("div");
+      hint.className = "hint";
+      hint.style.margin = "4px 0";
+      hint.style.fontSize = "11px";
+      var b = document.createElement("b");
+      b.textContent = "No staff cached. ";
+      hint.appendChild(b);
+      hint.appendChild(document.createTextNode("Have an owner/admin sign in to Dine on this computer once to cache all staff, or each staff member signs in individually."));
+      el.appendChild(hint);
+      return;
+    }
+    var tbl = document.createElement("table");
     tbl.className = "tbl";
-    const thead = document.createElement("thead");
-    const htr = document.createElement("tr");
-    ["Name", "Email", "Role", "Manager PIN", ""].forEach(function(h) {
-      const th = document.createElement("th");
-      th.textContent = h;
-      htr.appendChild(th);
+    var thead = document.createElement("thead");
+    var htr = document.createElement("tr");
+    ["Name", "Role", "PIN", "Status"].forEach(function(h) {
+      var th = document.createElement("th"); th.textContent = h; htr.appendChild(th);
     });
     thead.appendChild(htr);
     tbl.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    d.users.forEach(function(u) {
-      const tr = document.createElement("tr");
-      const tdN = document.createElement("td"); tdN.textContent = u.name || "—";
-      const tdE = document.createElement("td"); tdE.className = "muted"; tdE.textContent = u.email || "—";
-      const tdR = document.createElement("td"); tdR.appendChild(pill(u.role || "—", "role"));
-      const tdP = document.createElement("td");
-      tdP.appendChild(u.hasPin ? pill("set", "pin") : pill("—"));
-      const tdS = document.createElement("td");
+    var tbody = document.createElement("tbody");
+    users.forEach(function(u) {
+      var tr = document.createElement("tr");
+      var tdN = document.createElement("td"); tdN.textContent = u.name || "—";
+      var tdR = document.createElement("td"); tdR.appendChild(pill(u.role || "—", "role"));
+      var tdP = document.createElement("td"); tdP.appendChild(u.hasPin ? pill("set", "pin") : pill("—"));
+      var tdS = document.createElement("td");
       if (!u.isActive) tdS.appendChild(pill("inactive", "off"));
-      tr.append(tdN, tdE, tdR, tdP, tdS);
+      tr.append(tdN, tdR, tdP, tdS);
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
-    uCard.appendChild(tbl);
-  }
+    el.appendChild(tbl);
+  }));
 
-  // Recent orders
-  if (!d.recentOrders.length) {
-    const e = document.createElement("div");
-    e.className = "empty";
-    e.textContent = "No orders cached yet.";
-    oCard.appendChild(e);
-  } else {
-    const tbl = document.createElement("table");
+  // 5. Terminals
+  var terminals = d.terminals || [];
+  card.appendChild(invRow("terminals", "Terminals", terminals.length, null, function(el) {
+    if (terminals.length === 0) {
+      var warn = document.createElement("div");
+      warn.className = "warn-banner";
+      warn.textContent = "No terminals cached. The Dine server may not include terminals in the snapshot yet.";
+      el.appendChild(warn);
+      return;
+    }
+    terminals.forEach(function(t) {
+      el.appendChild(subItem(t.code, "next #" + t.nextSeq));
+    });
+  }, terminals.length === 0));
+
+  // 6. Orders
+  var orders = d.recentOrders || [];
+  var orderCount = d.counts.orders || 0;
+  var unsyncedCount = d.counts.unsyncedOrders || 0;
+  var orderDetail = unsyncedCount > 0 ? unsyncedCount + " unsynced" : "all synced";
+  card.appendChild(invRow("orders", "Orders", orderCount, orderDetail, function(el) {
+    if (orders.length === 0) {
+      el.appendChild(subItem("No orders cached yet", ""));
+      return;
+    }
+    var tbl = document.createElement("table");
     tbl.className = "tbl";
-    const thead = document.createElement("thead");
-    const htr = document.createElement("tr");
+    var thead = document.createElement("thead");
+    var htr = document.createElement("tr");
     ["Reference", "Status", "Total", "Source", "Synced"].forEach(function(h) {
-      const th = document.createElement("th");
-      th.textContent = h;
-      htr.appendChild(th);
+      var th = document.createElement("th"); th.textContent = h; htr.appendChild(th);
     });
     thead.appendChild(htr);
     tbl.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    d.recentOrders.forEach(function(o) {
-      const tr = document.createElement("tr");
-      const tdR = document.createElement("td"); tdR.textContent = o.reference || "—";
-      const tdSt = document.createElement("td"); tdSt.appendChild(pill(o.status || "—"));
-      const tdT = document.createElement("td"); tdT.textContent = fmtMoney(o.total_amount);
-      const tdSrc = document.createElement("td");
+    var tbody = document.createElement("tbody");
+    orders.forEach(function(o) {
+      var tr = document.createElement("tr");
+      var tdR = document.createElement("td"); tdR.textContent = o.reference || "—";
+      var tdSt = document.createElement("td"); tdSt.appendChild(pill(o.status || "—"));
+      var tdT = document.createElement("td"); tdT.textContent = fmtMoney(o.total_amount);
+      var tdSrc = document.createElement("td");
       tdSrc.appendChild(o.origin === "offline" ? pill("offline", "ofl") : pill("online", "onl"));
-      const tdSy = document.createElement("td");
+      var tdSy = document.createElement("td");
       if (o.origin === "offline") {
         tdSy.appendChild(o.synced_at ? pill("synced", "onl") : pill("pending", "ofl"));
       } else {
@@ -632,46 +850,175 @@ function renderOffline(res) {
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
-    oCard.appendChild(tbl);
+    el.appendChild(tbl);
+  }, unsyncedCount > 0));
+
+  // 7. Printers & Routing
+  var printerDetails = d.printerDetails || [];
+  var printRouting = d.printRouting || [];
+  card.appendChild(invRow("printers", "Printers & Routing", printerDetails.length,
+    printRouting.length + " routes",
+    function(el) {
+      if (printerDetails.length === 0) {
+        el.appendChild(subItem("No printers cached", ""));
+        return;
+      }
+      printerDetails.forEach(function(p) {
+        var label = p.name + " (" + (p.connection || "network") + ")";
+        var val = p.isActive ? (p.printerMode || "receipt") : "inactive";
+        el.appendChild(subItem(label, val));
+      });
+      if (printRouting.length > 0) {
+        var hdr = document.createElement("div");
+        hdr.className = "sub-item";
+        hdr.style.marginTop = "6px";
+        hdr.style.borderTop = "1px solid #f1f5f9";
+        hdr.style.paddingTop = "6px";
+        var hdrLbl = document.createElement("span");
+        hdrLbl.style.fontWeight = "600";
+        hdrLbl.textContent = "Routes";
+        hdr.appendChild(hdrLbl);
+        el.appendChild(hdr);
+        printRouting.forEach(function(r) {
+          el.appendChild(subItem(r.role + " (station: " + (r.stationId || "—").substring(0, 8) + "…)", r.printerId ? r.printerId.substring(0, 8) + "…" : "no printer"));
+        });
+      }
+    }
+  ));
+
+  // 8. Kitchen Stations
+  var stations = d.kitchenStations || [];
+  card.appendChild(invRow("stations", "Kitchen Stations", stations.length, null, function(el) {
+    if (stations.length === 0) {
+      el.appendChild(subItem("No stations cached", ""));
+      return;
+    }
+    stations.forEach(function(s) {
+      el.appendChild(subItem(s.name + (s.label ? " (" + s.label + ")" : ""), s.hasPrinter ? "has printer" : "no printer"));
+    });
+  }, stations.some(function(s) { return !s.hasPrinter; })));
+
+  // 9. Settings
+  var settingsDetails = d.settingsDetails || {};
+  var settingsCount = d.counts.settings || 0;
+  card.appendChild(invRow("settings", "Settings", settingsCount, null, function(el) {
+    if (settingsCount === 0) {
+      el.appendChild(subItem("No settings cached", ""));
+      return;
+    }
+    var keys = Object.keys(settingsDetails);
+    if (keys.length === 0) {
+      el.appendChild(subItem("Settings data stored", String(settingsCount) + " records"));
+      return;
+    }
+    keys.forEach(function(k) {
+      var v = settingsDetails[k];
+      var display = typeof v === "object" ? JSON.stringify(v).substring(0, 60) : String(v);
+      el.appendChild(subItem(k, display));
+    });
+  }));
+
+  // 10. Branding
+  var branding = d.brandingDetails || [];
+  card.appendChild(invRow("branding", "Branding", branding.length, null, function(el) {
+    if (branding.length === 0) {
+      el.appendChild(subItem("No branding cached", ""));
+      return;
+    }
+    branding.forEach(function(b) {
+      el.appendChild(subItem(b.name || "—", b.address || "—"));
+      if (b.phone) el.appendChild(subItem("Phone", b.phone));
+      if (b.taxLines && b.taxLines.length) {
+        b.taxLines.forEach(function(t) {
+          el.appendChild(subItem("Tax: " + (t.label || t.name || "—"), (t.rate || 0) + "%"));
+        });
+      }
+    });
+  }));
+
+  // 11. Print Templates
+  var templates = d.printTemplateKinds || [];
+  card.appendChild(invRow("templates", "Print Templates", templates.length, null, function(el) {
+    if (templates.length === 0) {
+      el.appendChild(subItem("No templates cached", ""));
+      return;
+    }
+    templates.forEach(function(t) {
+      el.appendChild(subItem(t, ""));
+    });
+  }));
+}
+
+// ── Storage card ───────────────────────────────────────────────
+function renderStorage(d) {
+  var card = document.getElementById("offStorageCard");
+  while (card.firstChild) card.removeChild(card.firstChild);
+
+  if (!d) {
+    var empty = document.createElement("div");
+    empty.style.cssText = "font-size:12px;color:#94a3b8;padding:4px 0";
+    empty.textContent = "No storage data available";
+    card.appendChild(empty);
+    return;
   }
 
-  // Storage
-  const rows = [
+  var rows = [
     ["Encrypted database", fmtBytes(d.storage.dbBytes)],
-    ["Total orders kept", String(d.counts.orders)],
-    ["Online retention", d.storage.retentionDays + " days (auto-pruned)"],
-    ["Pending changes", String(d.counts.unsyncedChanges)],
+    ["Total orders", String(d.counts.orders || 0)],
+    ["Unsynced orders", String(d.counts.unsyncedOrders || 0)],
+    ["Online retention", (d.storage.retentionDays || 7) + " days (auto-pruned)"],
+    ["Pending changes", String(d.counts.unsyncedChanges || 0)],
   ];
-  if (d.terminals.length) {
-    rows.push(["Terminals", d.terminals.map(function(t) { return t.code + " (next #" + t.nextSeq + ")"; }).join(", ")]);
-  }
   rows.forEach(function(r) {
-    const line = document.createElement("div");
-    line.className = "meta";
-    const a = document.createElement("span"); a.textContent = r[0];
-    const b = document.createElement("span"); b.style.color = "#1f2937"; b.textContent = r[1];
+    var line = document.createElement("div");
+    line.className = "storage-row";
+    var a = document.createElement("span"); a.textContent = r[0];
+    var b = document.createElement("span"); b.className = "val"; b.textContent = r[1];
     line.append(a, b);
-    sCard.appendChild(line);
+    card.appendChild(line);
   });
-  const pathLine = document.createElement("div");
-  pathLine.className = "meta";
-  pathLine.style.marginTop = "10px";
-  const pa = document.createElement("span"); pa.textContent = "Location";
-  const pb = document.createElement("span");
-  pb.className = "muted"; pb.style.fontFamily = "ui-monospace, Menlo, monospace";
-  pb.style.fontSize = "10px"; pb.style.maxWidth = "70%"; pb.style.textAlign = "right";
-  pb.style.wordBreak = "break-all"; pb.textContent = d.storage.dbPath;
-  pathLine.append(pa, pb);
-  sCard.appendChild(pathLine);
+
+  if (d.storage.dbPath) {
+    var pathLine = document.createElement("div");
+    pathLine.className = "storage-path";
+    pathLine.textContent = d.storage.dbPath;
+    card.appendChild(pathLine);
+  }
 }
 
-function pollOffline() {
-  if (activePane !== "offline") return;
-  window.agent.getOfflineOverview().then(renderOffline).catch(function() {});
+// ── Master refresh for offline tab ─────────────────────────────
+function loadOfflineData() {
+  Promise.all([
+    window.agent.getOfflineOverview(),
+    window.agent.getSyncLog()
+  ]).then(function(results) {
+    var overview = results[0];
+    var syncLog = results[1];
+    renderSyncBar(overview, syncLog);
+    if (overview && overview.ok) {
+      renderInventory(overview.data);
+      renderStorage(overview.data);
+    } else {
+      renderInventory(null);
+      renderStorage(null);
+    }
+  }).catch(function() {
+    renderSyncBar(null, []);
+    renderInventory(null);
+    renderStorage(null);
+  });
 }
-setInterval(function() { if (activePane === "offline") pollOffline(); }, 5000);
 
-// ── Biometric tab ───────────────────────────────────────────
+function refreshOfflineTab() {
+  loadOfflineData();
+}
+
+setInterval(function() { if (activePane === "offline") loadOfflineData(); }, 8000);
+
+// ═══════════════════════════════════════════════════════════════
+// ── BIOMETRIC TAB ──────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
 function getBioDevices() {
   return (cfg.biometricDevices || []);
 }
@@ -681,43 +1028,43 @@ function bioDeviceEntry(idx) {
 }
 
 function renderBioDevices() {
-  const list = document.getElementById("bioDevices");
+  var list = document.getElementById("bioDevices");
   while (list.firstChild) list.removeChild(list.firstChild);
-  const devices = getBioDevices();
+  var devices = getBioDevices();
   if (devices.length === 0) {
-    const empty = document.createElement("div");
+    var empty = document.createElement("div");
     empty.className = "empty";
     empty.style.marginBottom = "10px";
     empty.textContent = "No devices added yet.";
     list.appendChild(empty);
   }
   devices.forEach(function(dev, i) {
-    const card = document.createElement("div");
+    var card = document.createElement("div");
     card.className = "card";
     card.style.marginBottom = "8px";
 
-    const header = document.createElement("div");
+    var header = document.createElement("div");
     header.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px";
-    const dot = document.createElement("span");
+    var dot = document.createElement("span");
     dot.className = "dot yellow";
     dot.id = "bioDevDot_" + i;
-    const nm = document.createElement("span");
+    var nm = document.createElement("span");
     nm.style.cssText = "font-weight:600;font-size:13px;flex:1";
     nm.textContent = dev.name || "Unnamed";
-    const addr = document.createElement("span");
+    var addr = document.createElement("span");
     addr.style.cssText = "font-size:11px;color:#94a3b8;font-family:monospace";
     addr.textContent = (dev.host || "?") + ":" + (dev.port || 4370);
     header.append(dot, nm, addr);
 
-    const statusLine = document.createElement("div");
+    var statusLine = document.createElement("div");
     statusLine.className = "status";
     statusLine.id = "bioDevSt_" + i;
     statusLine.style.marginBottom = "8px";
 
-    const actions = document.createElement("div");
+    var actions = document.createElement("div");
     actions.className = "actions";
 
-    const testBtn = document.createElement("button");
+    var testBtn = document.createElement("button");
     testBtn.className = "ghost";
     testBtn.textContent = "Test Connection";
     testBtn.addEventListener("click", function() {
@@ -730,11 +1077,11 @@ function renderBioDevices() {
             cfg.biometricDevices[i].serial = r.serial;
             window.agent.saveConfig(cfg);
           }
-          const regNote = r.registered
-            ? "  |  registered in Dine ✓"
+          var regNote = r.registered
+            ? "  |  registered in Dine"
             : (r.registerError ? "  |  not registered: " + r.registerError : "");
           statusLine.className = "status ok";
-          statusLine.textContent = "Connected ✓  Serial: " + r.serial + "  |  " + r.userCounts + " users  |  " + r.logCounts + " punch records" + regNote;
+          statusLine.textContent = "Connected  Serial: " + r.serial + "  |  " + r.userCounts + " users  |  " + r.logCounts + " punch records" + regNote;
         } else {
           dot.className = "dot red";
           statusLine.className = "status err";
@@ -747,12 +1094,12 @@ function renderBioDevices() {
       });
     });
 
-    const pullBtn = document.createElement("button");
+    var pullBtn = document.createElement("button");
     pullBtn.className = "ghost";
     pullBtn.textContent = "Pull Attendance Now";
     pullBtn.addEventListener("click", function() {
       pullBtn.disabled = true;
-      const prevText = pullBtn.textContent;
+      var prevText = pullBtn.textContent;
       pullBtn.textContent = "Pulling…";
       statusLine.className = "status";
       statusLine.textContent = "Reading punches from device…";
@@ -763,7 +1110,7 @@ function renderBioDevices() {
           var parts = [];
           parts.push("Device has " + (r.totalLogs != null ? r.totalLogs : "?") + " punch record(s)");
           parts.push((r.newPunches || 0) + " new pulled");
-          if (r.pushed) parts.push("pushed to Dine ✓");
+          if (r.pushed) parts.push("pushed to Dine");
           else if (r.pushError) parts.push("push issue: " + r.pushError);
           if ((r.newPunches || 0) === 0) parts.push("(nothing new since last pull)");
           statusLine.textContent = parts.join("  |  ");
@@ -782,7 +1129,7 @@ function renderBioDevices() {
       });
     });
 
-    const toggleBtn = document.createElement("button");
+    var toggleBtn = document.createElement("button");
     toggleBtn.className = dev.enabled ? "ghost" : "primary";
     toggleBtn.textContent = dev.enabled ? "Disable" : "Enable";
     toggleBtn.addEventListener("click", function() {
@@ -790,7 +1137,7 @@ function renderBioDevices() {
       window.agent.saveConfig(cfg).then(function() { renderBioDevices(); updateBioDeviceSelect(); });
     });
 
-    const removeBtn = document.createElement("button");
+    var removeBtn = document.createElement("button");
     removeBtn.className = "danger";
     removeBtn.textContent = "Remove";
     removeBtn.addEventListener("click", function() {
@@ -807,18 +1154,18 @@ function renderBioDevices() {
 }
 
 function updateBioDeviceSelect() {
-  const sel = document.getElementById("bioSyncDevice");
+  var sel = document.getElementById("bioSyncDevice");
   while (sel.firstChild) sel.removeChild(sel.firstChild);
-  const devices = getBioDevices();
+  var devices = getBioDevices();
   if (devices.length === 0) {
-    const o = document.createElement("option");
+    var o = document.createElement("option");
     o.textContent = "No devices configured";
     o.disabled = true;
     sel.appendChild(o);
     return;
   }
   devices.forEach(function(dev, i) {
-    const o = document.createElement("option");
+    var o = document.createElement("option");
     o.value = String(i);
     o.textContent = (dev.name || "Device " + i) + "  —  " + (dev.host || "?") + ":" + (dev.port || 4370);
     sel.appendChild(o);
@@ -842,16 +1189,16 @@ function pollBiometricStatus() {
     if (scanEl) scanEl.textContent = fmtTime(s.lastScan);
     document.getElementById("bioSyncN").textContent = fmtTime(s.lastSync);
 
-    const statusEl = document.getElementById("bioDeviceStatuses");
+    var statusEl = document.getElementById("bioDeviceStatuses");
     while (statusEl.firstChild) statusEl.removeChild(statusEl.firstChild);
     (s.devices || []).forEach(function(d) {
-      const row = document.createElement("div");
+      var row = document.createElement("div");
       row.style.cssText = "display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-top:1px solid #f1f5f9";
-      const dot = document.createElement("span");
+      var dot = document.createElement("span");
       dot.className = "dot " + (d.connected ? "green" : "red");
-      const lbl = document.createElement("span");
+      var lbl = document.createElement("span");
       lbl.textContent = d.name;
-      const st = document.createElement("span");
+      var st = document.createElement("span");
       st.style.cssText = "margin-left:auto;font-size:11px;color:#94a3b8";
       st.textContent = d.connected ? "polling" : "disconnected";
       row.append(dot, lbl, st);
@@ -863,8 +1210,8 @@ setInterval(function() { if (activePane === "biometric") pollBiometricStatus(); 
 
 // Save attendance device key
 document.getElementById("bioSaveConfigBtn").addEventListener("click", function() {
-  const st = document.getElementById("bioConfigStatus");
-  const key = document.getElementById("bioKey").value.trim();
+  var st = document.getElementById("bioConfigStatus");
+  var key = document.getElementById("bioKey").value.trim();
   if (key && !key.startsWith("atk_")) {
     st.className = "status err";
     st.textContent = "That doesn't look like an attendance device key (should start with atk_).";
@@ -875,7 +1222,7 @@ document.getElementById("bioSaveConfigBtn").addEventListener("click", function()
   st.textContent = "Saving…";
   window.agent.saveConfig(cfg).then(function() {
     st.className = "status ok";
-    st.textContent = "Saved ✓ — now test each device's connection below to register it.";
+    st.textContent = "Saved — now test each device's connection below to register it.";
     setTimeout(function() { st.textContent = ""; }, 4000);
   }).catch(function(e) {
     st.className = "status err";
@@ -885,16 +1232,13 @@ document.getElementById("bioSaveConfigBtn").addEventListener("click", function()
 
 // Add device
 document.getElementById("bioAddBtn").addEventListener("click", function() {
-  const name = document.getElementById("bioAddName").value.trim();
-  const host = document.getElementById("bioAddHost").value.trim();
-  const port = parseInt(document.getElementById("bioAddPort").value) || 4370;
+  var name = document.getElementById("bioAddName").value.trim();
+  var host = document.getElementById("bioAddHost").value.trim();
+  var port = parseInt(document.getElementById("bioAddPort").value) || 4370;
   if (!host) { alert("Enter the device IP address."); return; }
-  // Our own stable, unique per-device id. Used as the device identity whenever
-  // the terminal's hardware serial is unreadable, so it must not collide —
-  // timestamp + random suffix. Scoped per tenant server-side either way.
-  const id = "zk_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+  var id = "zk_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   if (!cfg.biometricDevices) cfg.biometricDevices = [];
-  cfg.biometricDevices.push({ id, name: name || host, type: "zk-tcp", host, port, enabled: true, pollIntervalMs: 15000 });
+  cfg.biometricDevices.push({ id: id, name: name || host, type: "zk-tcp", host: host, port: port, enabled: true, pollIntervalMs: 15000 });
   document.getElementById("bioAddName").value = "";
   document.getElementById("bioAddHost").value = "";
   document.getElementById("bioAddPort").value = "";
@@ -903,11 +1247,11 @@ document.getElementById("bioAddBtn").addEventListener("click", function() {
 
 // Sync staff from Dine to device
 document.getElementById("bioSyncStaffBtn").addEventListener("click", function() {
-  const st = document.getElementById("bioSyncStatus");
-  const results = document.getElementById("bioSyncResults");
-  const sel = document.getElementById("bioSyncDevice");
-  const idx = parseInt(sel.value);
-  const dev = bioDeviceEntry(idx);
+  var st = document.getElementById("bioSyncStatus");
+  var results = document.getElementById("bioSyncResults");
+  var sel = document.getElementById("bioSyncDevice");
+  var idx = parseInt(sel.value);
+  var dev = bioDeviceEntry(idx);
   if (!dev) { st.className = "status err"; st.textContent = "Select a device first."; return; }
   st.className = "status";
   st.textContent = "Fetching staff from Dine…";
@@ -919,28 +1263,28 @@ document.getElementById("bioSyncStaffBtn").addEventListener("click", function() 
       st.textContent = r.error || "Failed";
       return;
     }
-    const removedNote = r.removed > 0 ? "  ·  " + r.removed + " ex-staff removed from device" : "";
+    var removedNote = r.removed > 0 ? "  |  " + r.removed + " ex-staff removed from device" : "";
     st.className = r.ok ? "status ok" : "status err";
     st.textContent = r.ok
-      ? "Done — " + r.pushed + " staff pushed to device ✓" + (r.failed > 0 ? "  (" + r.failed + " failed)" : "") + removedNote
+      ? "Done — " + r.pushed + " staff pushed to device" + (r.failed > 0 ? "  (" + r.failed + " failed)" : "") + removedNote
       : (r.error || "Partial failure");
 
     if (r.results && r.results.length > 0) {
-      const tbl = document.createElement("table");
+      var tbl = document.createElement("table");
       tbl.className = "tbl";
-      const thead = document.createElement("thead");
-      const htr = document.createElement("tr");
+      var thead = document.createElement("thead");
+      var htr = document.createElement("tr");
       ["Name", "PIN", "Status"].forEach(function(h) {
-        const th = document.createElement("th"); th.textContent = h; htr.appendChild(th);
+        var th = document.createElement("th"); th.textContent = h; htr.appendChild(th);
       });
       thead.appendChild(htr);
       tbl.appendChild(thead);
-      const tbody = document.createElement("tbody");
+      var tbody = document.createElement("tbody");
       r.results.forEach(function(row) {
-        const tr = document.createElement("tr");
-        const tdN = document.createElement("td"); tdN.textContent = row.name;
-        const tdP = document.createElement("td"); tdP.appendChild(pill(row.pin, "pin"));
-        const tdS = document.createElement("td");
+        var tr = document.createElement("tr");
+        var tdN = document.createElement("td"); tdN.textContent = row.name;
+        var tdP = document.createElement("td"); tdP.appendChild(pill(row.pin, "pin"));
+        var tdS = document.createElement("td");
         tdS.appendChild(row.ok ? pill("synced", "onl") : pill(row.error || "failed", "off"));
         tr.append(tdN, tdP, tdS);
         tbody.appendChild(tr);
@@ -956,11 +1300,11 @@ document.getElementById("bioSyncStaffBtn").addEventListener("click", function() 
 
 // View enrolled users on device
 document.getElementById("bioViewUsersBtn").addEventListener("click", function() {
-  const st = document.getElementById("bioSyncStatus");
-  const results = document.getElementById("bioSyncResults");
-  const sel = document.getElementById("bioSyncDevice");
-  const idx = parseInt(sel.value);
-  const dev = bioDeviceEntry(idx);
+  var st = document.getElementById("bioSyncStatus");
+  var results = document.getElementById("bioSyncResults");
+  var sel = document.getElementById("bioSyncDevice");
+  var idx = parseInt(sel.value);
+  var dev = bioDeviceEntry(idx);
   if (!dev) { st.className = "status err"; st.textContent = "Select a device first."; return; }
   st.className = "status";
   st.textContent = "Reading device…";
@@ -975,28 +1319,28 @@ document.getElementById("bioViewUsersBtn").addEventListener("click", function() 
     st.className = "status ok";
     st.textContent = r.users.length + " user(s) enrolled on device";
     if (r.users.length === 0) {
-      const e = document.createElement("div");
+      var e = document.createElement("div");
       e.className = "empty";
       e.style.marginTop = "8px";
       e.textContent = "No users enrolled. Sync staff first, then each person enrolls their fingerprint at the device.";
       results.appendChild(e);
       return;
     }
-    const tbl = document.createElement("table");
+    var tbl = document.createElement("table");
     tbl.className = "tbl";
-    const thead = document.createElement("thead");
-    const htr = document.createElement("tr");
+    var thead = document.createElement("thead");
+    var htr = document.createElement("tr");
     ["Name", "PIN (userId)", "Role"].forEach(function(h) {
-      const th = document.createElement("th"); th.textContent = h; htr.appendChild(th);
+      var th = document.createElement("th"); th.textContent = h; htr.appendChild(th);
     });
     thead.appendChild(htr);
     tbl.appendChild(thead);
-    const tbody = document.createElement("tbody");
+    var tbody = document.createElement("tbody");
     r.users.forEach(function(u) {
-      const tr = document.createElement("tr");
-      const tdN = document.createElement("td"); tdN.textContent = u.name || "(no name)";
-      const tdP = document.createElement("td"); tdP.appendChild(pill(u.userId, "pin"));
-      const tdR = document.createElement("td");
+      var tr = document.createElement("tr");
+      var tdN = document.createElement("td"); tdN.textContent = u.name || "(no name)";
+      var tdP = document.createElement("td"); tdP.appendChild(pill(u.userId, "pin"));
+      var tdR = document.createElement("td");
       tdR.appendChild(pill(u.role === 14 ? "admin" : "user", u.role === 14 ? "role" : ""));
       tr.append(tdN, tdP, tdR);
       tbody.appendChild(tr);

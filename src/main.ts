@@ -12,7 +12,7 @@ import { setupAutoUpdater } from "./updater";
 import { initStore, prune } from "./store/db";
 import { initPrintLedger, prunePrintLedger } from "./store/print-ledger";
 import { getOfflineOverview } from "./store/repo";
-import { startCloudSync } from "./cloud-sync";
+import { startCloudSync, verifyDeviceKey, syncNow, getSyncLog } from "./cloud-sync";
 import { initAttendanceStore, pruneOldPunches } from "./biometric/attendance-store";
 import { startAttendanceSync, flushNow } from "./biometric/attendance-sync";
 import { startAllBiometricDevices, stopAllBiometricDevices, getDeviceStatuses, pollDeviceOnce, getLastScanAt } from "./biometric/zk-adapter";
@@ -103,6 +103,26 @@ ipcMain.handle("offline:overview", () => {
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
+
+ipcMain.handle("offline:verify-key", async (_, key: string) => {
+  try {
+    return await verifyDeviceKey(key);
+  } catch (e) {
+    return { valid: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle("offline:sync-now", async () => {
+  try {
+    return await syncNow();
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+});
+
+ipcMain.handle("offline:sync-log", () => {
+  return getSyncLog();
 });
 
 ipcMain.handle("biometric:status", () => {

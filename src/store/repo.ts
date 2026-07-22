@@ -257,6 +257,122 @@ export function getOfflineOverview() {
     }
   }
 
+  // ── Detailed breakdowns for the settings UI ──────────────────
+
+  // Menu categories with per-category item counts
+  let menuCategories: Array<{ id: string; name: string; sortOrder: number; itemCount: number }> = [];
+  try {
+    menuCategories = (
+      d
+        .prepare(
+          `SELECT mc.id, mc.name, mc.sort_order,
+                  (SELECT count(*) FROM menu_items mi WHERE mi.category_id = mc.id) AS item_count
+           FROM menu_categories mc ORDER BY mc.sort_order`
+        )
+        .all() as Array<{ id: string; name: string; sort_order: number; item_count: number }>
+    ).map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order, itemCount: r.item_count }));
+  } catch { /* table may not exist */ }
+
+  // Combo details
+  let comboDetails: Array<{ id: string; name: string; comboPrice: number; isActive: boolean }> = [];
+  try {
+    comboDetails = (
+      d
+        .prepare("SELECT id, name, combo_price, is_active FROM combos ORDER BY name")
+        .all() as Array<{ id: string; name: string; combo_price: number; is_active: number }>
+    ).map((r) => ({ id: r.id, name: r.name, comboPrice: r.combo_price, isActive: !!r.is_active }));
+  } catch { /* table may not exist */ }
+
+  // Combo groups / combo group items counts
+  let comboGroupsCount = 0;
+  let comboGroupItemsCount = 0;
+  try { comboGroupsCount = countOf("combo_groups"); } catch { /* skip */ }
+  try { comboGroupItemsCount = countOf("combo_group_items"); } catch { /* skip */ }
+
+  // Table details
+  let tableDetails: Array<{ id: string; name: string; status: string | null; locationName: string | null }> = [];
+  try {
+    tableDetails = (
+      d
+        .prepare("SELECT id, name, status, location_name FROM tables ORDER BY name")
+        .all() as Array<{ id: string; name: string; status: string | null; location_name: string | null }>
+    ).map((r) => ({ id: r.id, name: r.name, status: r.status, locationName: r.location_name }));
+  } catch { /* table may not exist */ }
+
+  // Printer details
+  let printerDetails: Array<{ id: string; name: string; connection: string | null; printerMode: string | null; isActive: boolean }> = [];
+  try {
+    printerDetails = (
+      d
+        .prepare("SELECT id, name, connection, printer_mode, is_active FROM printers ORDER BY name")
+        .all() as Array<{ id: string; name: string; connection: string | null; printer_mode: string | null; is_active: number }>
+    ).map((r) => ({
+      id: r.id,
+      name: r.name,
+      connection: r.connection,
+      printerMode: r.printer_mode,
+      isActive: !!r.is_active,
+    }));
+  } catch { /* table may not exist */ }
+
+  // Print routing details (aggregated counts per role)
+  let printRouting: Array<{ id: string; role: string | null; stationId: string | null; printerId: string | null }> = [];
+  try {
+    printRouting = (
+      d
+        .prepare("SELECT id, role, station_id, printer_id FROM print_routing ORDER BY role")
+        .all() as Array<{ id: string; role: string | null; station_id: string | null; printer_id: string | null }>
+    ).map((r) => ({ id: r.id, role: r.role, stationId: r.station_id, printerId: r.printer_id }));
+  } catch { /* table may not exist */ }
+
+  // Kitchen station details
+  let kitchenStations: Array<{ id: string; name: string; label: string | null; hasPrinter: boolean }> = [];
+  try {
+    kitchenStations = (
+      d
+        .prepare(
+          `SELECT ks.id, ks.name, ks.label,
+                  EXISTS(SELECT 1 FROM print_routing pr WHERE pr.station_id = ks.id) AS has_printer
+           FROM kitchen_stations ks ORDER BY ks.name`
+        )
+        .all() as Array<{ id: string; name: string; label: string | null; has_printer: number }>
+    ).map((r) => ({ id: r.id, name: r.name, label: r.label, hasPrinter: !!r.has_printer }));
+  } catch { /* table may not exist */ }
+
+  // Settings details (selected known keys, parsed)
+  let settingsDetails: Record<string, unknown> = {};
+  try {
+    const settingsKeys = ["payment_methods", "order_config", "disabled_tabs", "payment_method_defs"];
+    for (const sk of settingsKeys) {
+      const raw = getSetting(sk);
+      if (raw !== null) {
+        try { settingsDetails[sk] = JSON.parse(raw); } catch { settingsDetails[sk] = raw; }
+      }
+    }
+  } catch { /* skip */ }
+
+  // Branding details
+  let brandingDetails: Array<{ id: string; name: string | null; address: string | null; phone: string | null; taxLines: unknown }> = [];
+  try {
+    brandingDetails = (
+      d
+        .prepare("SELECT id, name, address, phone, tax_lines FROM branding ORDER BY id")
+        .all() as Array<{ id: string; name: string | null; address: string | null; phone: string | null; tax_lines: string | null }>
+    ).map((r) => {
+      let taxLines: unknown = null;
+      try { taxLines = r.tax_lines ? JSON.parse(r.tax_lines) : null; } catch { taxLines = r.tax_lines; }
+      return { id: r.id, name: r.name, address: r.address, phone: r.phone, taxLines };
+    });
+  } catch { /* table may not exist */ }
+
+  // Print template kinds
+  let printTemplateKinds: string[] = [];
+  try {
+    printTemplateKinds = (
+      d.prepare("SELECT kind FROM print_templates ORDER BY kind").all() as Array<{ kind: string }>
+    ).map((r) => r.kind);
+  } catch { /* table may not exist */ }
+
   return {
     entitled,
     paired,
@@ -277,10 +393,21 @@ export function getOfflineOverview() {
       unsyncedChanges,
       menuItems,
       combos,
+      comboGroups: comboGroupsCount,
+      comboGroupItems: comboGroupItemsCount,
     },
     storage: { dbPath: DB_PATH, dbBytes, retentionDays: 2 },
     terminals,
     recentOrders,
+    menuCategories,
+    comboDetails,
+    tableDetails,
+    printerDetails,
+    printRouting,
+    kitchenStations,
+    settingsDetails,
+    brandingDetails,
+    printTemplateKinds,
   };
 }
 
