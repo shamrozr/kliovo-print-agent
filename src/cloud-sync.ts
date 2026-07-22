@@ -46,14 +46,22 @@ export async function verifyDeviceKey(key: string): Promise<{
   const trimmed = key.trim();
   if (!trimmed || !trimmed.startsWith("dok_")) return { valid: false, error: "Key must start with dok_" };
 
-  // Try the verify endpoint first; fall back to snapshot if 404.
+  // Try the verify endpoint first; fall back to snapshot if it isn't a usable
+  // device-key API. Two cases send us to the fallback:
+  //   • 404 — the endpoint doesn't exist on this deployment.
+  //   • a followed redirect — on some deployments /api/offline/verify-key sits
+  //     BEHIND the site's session middleware, which 307-redirects the Bearer
+  //     request to /api/auth/signin. fetch follows that automatically, so the
+  //     dok_ key is never evaluated and we'd otherwise misreport a valid key as
+  //     "rejected". res.redirected tells us the request was bounced.
+  // The snapshot endpoint authenticates with the SAME Bearer key and is the
+  // real source of truth for validity, so falling back there is correct.
   try {
     const res = await fetch(`${cfg.serverUrl}/api/offline/verify-key`, {
       headers: { Authorization: `Bearer ${trimmed}` },
       signal: AbortSignal.timeout(10_000),
     });
-    if (res.status === 404) {
-      // Server doesn't have verify-key yet — fall back to snapshot
+    if (res.status === 404 || res.redirected) {
       return verifyViaSnapshot(trimmed, cfg.serverUrl);
     }
     if (res.status === 401) return { valid: false, error: "Key rejected (revoked or wrong branch)" };
