@@ -5,6 +5,22 @@
 import { getStore } from "./db";
 import type { OrderRow, ItemRow, StationRow, BrandingRow } from "../print/render-map";
 import type { MirroredPrinter, MirroredRoute } from "../print/router";
+import type { LayoutConfig } from "../render/designer-types";
+
+/** Mirrored designer template for a document kind (e.g. "receipt"). Returns the
+ *  parsed layout_config, or null when no template/invalid JSON — callers then
+ *  render with built-in defaults. */
+export function getPrintTemplate(kind: string): LayoutConfig | null {
+  const row = getStore()
+    .prepare("SELECT layout_config FROM print_templates WHERE kind = ?")
+    .get(kind) as { layout_config?: string } | undefined;
+  if (!row?.layout_config) return null;
+  try {
+    return JSON.parse(row.layout_config) as LayoutConfig;
+  } catch {
+    return null;
+  }
+}
 
 export function getOrderRow(orderId: string): OrderRow | null {
   return (getStore().prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as OrderRow) ?? null;

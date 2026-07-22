@@ -5,6 +5,9 @@
  */
 import type { KotInput } from "../render/templates/kot";
 import type { ReceiptInput } from "../render/templates/receipt";
+import type { LayoutConfig } from "../render/designer-types";
+
+export type RasterLogo = { bytes: Buffer; widthBytes: number; heightDots: number };
 
 export interface OrderRow {
   id: string;
@@ -116,7 +119,8 @@ export function buildReceiptInput(
   branding: BrandingRow | null,
   time: string,
   date: string,
-  tableName?: string
+  tableName?: string,
+  opts?: { layoutConfig?: LayoutConfig; rasterLogo?: RasterLogo }
 ): ReceiptInput {
   const subtotalPaisa = toPaisa(order.subtotal);
   const taxPaisa = toPaisa(order.tax_amount);
@@ -134,7 +138,7 @@ export function buildReceiptInput(
       addressLines: branding?.address ? [branding.address] : undefined,
       phone: branding?.phone ?? undefined,
       taxLines,
-      rasterLogo: undefined,
+      rasterLogo: opts?.rasterLogo,
     },
     referenceNumber: order.reference || order.id,
     date,
@@ -162,5 +166,6 @@ export function buildReceiptInput(
       tipPaisa: toPaisa(p.tip),
       reference: p.reference,
     })),
+    layoutConfig: opts?.layoutConfig,
   };
 }

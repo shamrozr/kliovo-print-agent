@@ -11,7 +11,13 @@ import { logger } from "../logger";
 import { resolveKotTargets, resolveReceiptTarget, type ResolvedTarget } from "./router";
 import { buildKotInput, buildReceiptInput, kotJobId, receiptJobId } from "./render-map";
 import type { ItemRow as pr_ItemRow } from "./render-map";
+import { loadReceiptLogo } from "./logo";
 import * as pr from "../store/print-repo";
+
+/** Shared receipt options: mirrored designer template + locally-loaded logo. */
+function receiptExtras(paperWidth: 80 | 58) {
+  return { layoutConfig: pr.getPrintTemplate("receipt") ?? undefined, rasterLogo: loadReceiptLogo(paperWidth) ?? undefined };
+}
 
 function fmtTime(ms: number): { time: string; date: string } {
   const d = new Date(ms);
@@ -135,7 +141,7 @@ export async function fireReceipt(orderId: string, paymentId: string): Promise<v
     const branding = pr.getBranding();
     const { time, date } = fmtTime(Date.now());
     const tableName = pr.getTableName(order.table_id ?? undefined);
-    const input = buildReceiptInput(order, items, payments, branding, time, date, tableName);
+    const input = buildReceiptInput(order, items, payments, branding, time, date, tableName, receiptExtras(target.printer.paperWidth));
     const bytes = renderJob({ kind: "receipt", input }, renderContextFromPrinter(target.printer));
     await deliverOnce(receiptJobId(orderId, paymentId), target, bytes, `receipt ${orderId}`);
   } catch (e) {
@@ -151,7 +157,7 @@ export async function reprintReceipt(orderId: string): Promise<{ ok: boolean; er
   if (!target) return { ok: false, error: "no active printer" };
   const branding = pr.getBranding();
   const { time, date } = fmtTime(Date.now());
-  const input = buildReceiptInput(order, pr.getOrderItems(orderId), [], branding, time, date, pr.getTableName(order.table_id ?? undefined));
+  const input = buildReceiptInput(order, pr.getOrderItems(orderId), [], branding, time, date, pr.getTableName(order.table_id ?? undefined), receiptExtras(target.printer.paperWidth));
   const bytes = renderJob({ kind: "receipt", input }, renderContextFromPrinter(target.printer));
   try {
     await deliverToPrinter(target.printer, bytes);

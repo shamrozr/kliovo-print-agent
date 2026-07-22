@@ -79,12 +79,13 @@ export function resolveKotTargets(
   stationId: string | null
 ): ResolvedTarget[] {
   const byId = new Map(printers.map((p) => [p.id, p]));
-  const matched = routes.filter(
-    (r) =>
-      (r.role ?? "kot") !== "receipt" &&
-      ftMatch(r, fulfillmentType) &&
-      (wildcard(r.station_id) ? stationId == null : r.station_id === stationId)
-  );
+  const eligible = routes.filter((r) => (r.role ?? "kot") !== "receipt" && ftMatch(r, fulfillmentType));
+  // Most-specific-wins: a route naming THIS station beats a wildcard/catch-all
+  // route. Only if no station-specific route exists do the wildcard routes act
+  // as a true catch-all — so a stationed item never silently drops to the
+  // default printer just because it lacks its own per-station rule.
+  const specific = eligible.filter((r) => !wildcard(r.station_id) && r.station_id === stationId);
+  const matched = specific.length > 0 ? specific : eligible.filter((r) => wildcard(r.station_id));
 
   const targets: ResolvedTarget[] = [];
   for (const r of matched) {
@@ -110,8 +111,14 @@ export function resolveReceiptTarget(
     const p = byId.get(route.printer_id);
     if (p && isActive(p)) return { printer: toPrinterEntry(p), copies: Math.max(1, route.copies ?? 1), fallback: false };
   }
-  const receiptPrinter = printers.filter(isActive).find((p) => p.printer_mode === "receipt");
-  if (receiptPrinter) return { printer: toPrinterEntry(receiptPrinter), copies: 1, fallback: true };
+  // No explicit receipt route (routes default to role 'kot'), so send to a
+  // printer explicitly in receipt mode — the designated receipt station,
+  // preferring the default among them. This is a correct destination, not a
+  // fallback, so it must NOT be flagged as one.
+  const receiptPrinters = printers.filter(isActive).filter((p) => p.printer_mode === "receipt");
+  const receiptPrinter = receiptPrinters.find((p) => p.is_default === 1) ?? receiptPrinters[0];
+  if (receiptPrinter) return { printer: toPrinterEntry(receiptPrinter), copies: 1, fallback: false };
+  // Genuine misconfig: no receipt-mode printer at all → default/any active.
   const fb = fallbackPrinter(printers);
   return fb ? { printer: toPrinterEntry(fb), copies: 1, fallback: true } : null;
 }

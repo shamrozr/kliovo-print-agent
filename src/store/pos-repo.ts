@@ -187,9 +187,20 @@ export function listOrders(): any[] {
   const orders = d
     .prepare("SELECT * FROM orders WHERE created_at >= ? ORDER BY created_at DESC")
     .all(start.getTime()) as any[];
+  // Collapse reconciliation echoes: the same offline order can exist twice — the
+  // locally-created row and a copy mirrored back from the cloud (different PK,
+  // same reference). Keep the most-recently-updated row per reference so the
+  // list shows one card (the current state), not a Pending + Received pair.
+  const best = new Map<string, any>();
+  for (const o of orders) {
+    const key = o.reference || o.id;
+    const cur = best.get(key);
+    if (!cur || (Number(o.updated_at) || 0) > (Number(cur.updated_at) || 0)) best.set(key, o);
+  }
+  const kept = orders.filter((o) => best.get(o.reference || o.id) === o); // preserves created_at DESC
   const itemsStmt = d.prepare("SELECT * FROM order_items WHERE order_id = ? ORDER BY sort_order");
   const paysStmt = d.prepare("SELECT * FROM order_payments WHERE order_id = ?");
-  return orders.map((o) => ({ ...o, items: itemsStmt.all(o.id), payments: paysStmt.all(o.id) }));
+  return kept.map((o) => ({ ...o, items: itemsStmt.all(o.id), payments: paysStmt.all(o.id) }));
 }
 
 export function getOrder(orderId: string): any | null {

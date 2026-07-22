@@ -20,6 +20,9 @@ importers:
       electron-updater:
         specifier: ^6.3.9
         version: 6.8.9
+      pngjs:
+        specifier: ^7.0.0
+        version: 7.0.0
       zkteco-js:
         specifier: ^1.7.2
         version: 1.7.2
@@ -36,6 +39,9 @@ importers:
       '@types/node':
         specifier: ^20.14.0
         version: 20.19.43
+      '@types/pngjs':
+        specifier: ^6.0.5
+        version: 6.0.5
       electron:
         specifier: ^31.3.0
         version: 31.7.7
@@ -284,6 +290,9 @@ packages:
 
   '@types/plist@3.0.5':
     resolution: {integrity: sha512-E6OCaRmAe4WDmWNsL/9RMqdkkzDCY1etutkflWk4c+AcjDU07Pcz1fQwTX0TQz+Pxqn9i4L1TU3UFpjnrcDgxA==}
+
+  '@types/pngjs@6.0.5':
+    resolution: {integrity: sha512-0k5eKfrA83JOZPppLtS2C7OUtyNAl2wKNxfyYl9Q5g9lPkgBl/9hNyAu6HuEH2J4XmIv2znEpkDd0SaZVxW6iQ==}
 
   '@types/responselike@1.0.3':
     resolution: {integrity: sha512-H/+L+UkTV33uf49PH5pCAUBVPNj2nDBXTN+qS1dOwyyg24l3CcicicCA7ca+HMvJBZcFgl5r8e+RR6elsb4Lyw==}
@@ -1251,6 +1260,10 @@ packages:
     resolution: {integrity: sha512-ZIfcLJC+7E7FBFnDxm9MPmt7D+DidyQ26lewieO75AdhA2ayMtsJSES0iWzqJQbcVRSrTufQoy0DR94xHue0oA==}
     engines: {node: '>=10.4.0'}
 
+  pngjs@7.0.0:
+    resolution: {integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==}
+    engines: {node: '>=14.19.0'}
+
   postcss@8.5.21:
     resolution: {integrity: sha512-v4sDNP3fdNiWMfabO7OwOQdOX8TiQSztKyT1Wj0w+j7LDallJThJRBBBmzVGyYj0crMh7jlV4zepPkiNu9UwDQ==}
     engines: {node: ^10 || ^12 || >=14}
@@ -1937,6 +1950,10 @@ snapshots:
       '@types/node': 20.19.43
       xmlbuilder: 15.1.1
     optional: true
+
+  '@types/pngjs@6.0.5':
+    dependencies:
+      '@types/node': 20.19.43
 
   '@types/responselike@1.0.3':
     dependencies:
@@ -2978,6 +2995,8 @@ snapshots:
       '@xmldom/xmldom': 0.9.10
       base64-js: 1.5.1
       xmlbuilder: 15.1.1
+
+  pngjs@7.0.0: {}
 
   postcss@8.5.21:
     dependencies:

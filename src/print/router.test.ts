@@ -41,6 +41,24 @@ describe("resolveKotTargets", () => {
     const dead = printers.map((p) => ({ ...p, is_active: 0 }));
     expect(resolveKotTargets(dead, [], "dine_in", "s-kitchen")).toEqual([]);
   });
+
+  it("uses a wildcard catch-all route for a stationed item with no specific route", () => {
+    const routes: MirroredRoute[] = [{ id: "rw", station_id: "*", printer_id: "pb", role: "kot" }];
+    const t = resolveKotTargets(printers, routes, "dine_in", "s-grill");
+    expect(t).toHaveLength(1);
+    expect(t[0].printer.printerId).toBe("pb");
+    expect(t[0].fallback).toBe(false);
+  });
+
+  it("prefers a station-specific route over a wildcard catch-all", () => {
+    const routes: MirroredRoute[] = [
+      { id: "rw", station_id: "*", printer_id: "pb", role: "kot" },
+      { id: "rs", station_id: "s-grill", printer_id: "pk", role: "kot" },
+    ];
+    const t = resolveKotTargets(printers, routes, "dine_in", "s-grill");
+    expect(t).toHaveLength(1);
+    expect(t[0].printer.printerId).toBe("pk");
+  });
 });
 
 describe("resolveReceiptTarget", () => {
@@ -51,9 +69,15 @@ describe("resolveReceiptTarget", () => {
     expect(t?.fallback).toBe(false);
   });
 
-  it("falls back to a printer_mode=receipt printer, flagged", () => {
+  it("routes to a printer_mode=receipt printer as the designated destination (not a fallback)", () => {
     const t = resolveReceiptTarget(printers, [], "dine_in");
     expect(t?.printer.printerId).toBe("pc");
+    expect(t?.fallback).toBe(false);
+  });
+
+  it("only truly falls back (flagged) when no receipt-mode printer exists", () => {
+    const noReceiptMode = printers.map((p) => (p.id === "pc" ? { ...p, printer_mode: "kot" } : p));
+    const t = resolveReceiptTarget(noReceiptMode, [], "dine_in");
     expect(t?.fallback).toBe(true);
   });
 });
