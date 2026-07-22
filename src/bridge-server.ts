@@ -9,6 +9,7 @@ import {
   getPairingSecret,
   setPairingSecret,
   getStatus,
+  getCredentialsSyncedAt,
   getUnsynced,
   applyMirror,
   markSynced,
@@ -120,7 +121,7 @@ export function startBridgeServer(): http.Server {
     // Health snapshot — lets the POS show "printed ✓ / failed ✗" and surface
     // recent activity without tailing the agent log.
     if (req.method === "GET" && req.url === "/status") {
-      send(200, { ok: true, version: appVersion, ...getHealthSnapshot() });
+      send(200, { ok: true, version: appVersion, credentialsSyncedAt: getCredentialsSyncedAt(), ...getHealthSnapshot() });
       return;
     }
 

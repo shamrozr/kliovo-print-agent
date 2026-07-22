@@ -142,6 +142,13 @@ export function applyMirror(batches: { table: string; rows: Record<string, unkno
     // One bad batch must not abort the whole snapshot.
     try {
       total += mirrorUpsert(b.table, b.rows);
+      // Stamp the credentials-freshness clock ONLY when the users batch is
+      // actually present in this snapshot. Keying off `last_mirror_at` would lie
+      // when a snapshot omits users — offline logins would look fresh when they
+      // weren't refreshed. This is what /status + the settings tab surface so an
+      // operator can tell, before an outage, whether a web password change has
+      // reached this machine yet.
+      if (b.table === "users") setState("users_synced_at", String(Date.now()));
     } catch {
       /* skip this batch, keep applying the rest */
     }
@@ -151,6 +158,15 @@ export function applyMirror(batches: { table: string; rows: Record<string, unkno
 }
 
 // ── Status ───────────────────────────────────────────────────
+
+/** When the offline logins (users + password/PIN hashes) were last mirrored
+ *  from the web. null = never synced. Distinct from last_mirror_at: it only
+ *  advances when a snapshot actually carried the `users` batch. */
+export function getCredentialsSyncedAt(): number | null {
+  const v = getState("users_synced_at");
+  return v ? Number(v) : null;
+}
+
 export function getStatus() {
   const d = getStore();
   const lastMirror = getState("last_mirror_at");
@@ -165,6 +181,7 @@ export function getStatus() {
   return {
     warm: !!lastMirror,
     lastMirrorAt: lastMirror ? Number(lastMirror) : null,
+    credentialsSyncedAt: getCredentialsSyncedAt(),
     entitled,
     counts: { orders, unsyncedOrders, unsyncedChanges },
   };
@@ -181,11 +198,17 @@ export function getOfflineOverview() {
   const entitled = getState("entitled") === "true";
   const paired = !!getState("pairing_secret");
 
+  // Only POS logins matter offline — cashiers take orders, managers authorize
+  // voids/refunds. Owners/admins/kitchen staff never sign in to Aster, so we
+  // don't list them here. (Auth itself is unaffected: authenticate() reads the
+  // full users table — this filter is display-only.)
   const users = d
     .prepare(
       `SELECT id, name, email, role, is_active,
               (pin_hash IS NOT NULL AND pin_hash <> '') AS has_pin
-       FROM users ORDER BY is_active DESC, role, name`
+       FROM users
+       WHERE lower(role) IN ('cashier', 'manager')
+       ORDER BY is_active DESC, role, name`
     )
     .all() as Array<{
     id: string;
@@ -378,6 +401,7 @@ export function getOfflineOverview() {
     entitled,
     paired,
     lastMirrorAt: lastMirror ? Number(lastMirror) : null,
+    credentialsSyncedAt: getCredentialsSyncedAt(),
     users: users.map((u) => ({
       id: u.id,
       name: u.name,

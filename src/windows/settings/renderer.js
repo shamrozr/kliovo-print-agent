@@ -759,18 +759,30 @@ function renderInventory(d) {
     });
   }));
 
-  // 4. Staff (users)
+  // 4. POS logins (cashiers + managers only — the roles that sign in to Aster)
   var users = d.users || [];
-  card.appendChild(invRow("staff", "Staff", users.length, null, function(el) {
+  card.appendChild(invRow("staff", "POS Logins", users.length, null, function(el) {
+    // Credentials-freshness line: tells the operator when a web password change
+    // would last have reached this machine. Changes made during an outage won't
+    // apply offline until the next successful sync.
+    var freshness = document.createElement("div");
+    freshness.className = "hint";
+    freshness.style.margin = "4px 0 8px";
+    freshness.style.fontSize = "11px";
+    freshness.textContent = d.credentialsSyncedAt
+      ? "Logins synced " + ago(d.credentialsSyncedAt) + " — change a password in Dine, then Sync Now to refresh offline."
+      : "Logins never synced — connect once so cashier/manager passwords work offline.";
+    el.appendChild(freshness);
+
     if (users.length === 0) {
       var hint = document.createElement("div");
       hint.className = "hint";
       hint.style.margin = "4px 0";
       hint.style.fontSize = "11px";
       var b = document.createElement("b");
-      b.textContent = "No staff cached. ";
+      b.textContent = "No cashier or manager logins cached. ";
       hint.appendChild(b);
-      hint.appendChild(document.createTextNode("Have an owner/admin sign in to Dine on this computer once to cache all staff, or each staff member signs in individually."));
+      hint.appendChild(document.createTextNode("Have an owner/admin sign in to Dine on this computer once to cache logins, or each cashier/manager signs in individually."));
       el.appendChild(hint);
       return;
     }
