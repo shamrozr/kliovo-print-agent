@@ -1023,9 +1023,62 @@ function loadOfflineData() {
 
 function refreshOfflineTab() {
   loadOfflineData();
+  renderLogo();
 }
 
 setInterval(function() { if (activePane === "offline") loadOfflineData(); }, 8000);
+
+// ── Receipt logo ───────────────────────────────────────────────
+function renderLogo() {
+  window.agent.getLogo().then(function(info) {
+    var preview = document.getElementById("logoPreview");
+    var status = document.getElementById("logoStatus");
+    var clearBtn = document.getElementById("logoClearBtn");
+    preview.replaceChildren();
+    if (info && info.hasLogo && info.dataUrl) {
+      var img = document.createElement("img");
+      img.src = info.dataUrl;
+      img.style.maxWidth = "100%";
+      img.style.maxHeight = "100%";
+      preview.appendChild(img);
+      clearBtn.style.display = "";
+      if (info.valid) {
+        status.textContent = "Logo set — prints on every receipt (" + (info.widthDots || "?") + "×" + (info.heightDots || "?") + " dots).";
+        status.style.color = "#16a34a";
+      } else {
+        status.textContent = "This file couldn't be read as an image. Try another PNG.";
+        status.style.color = "#dc2626";
+      }
+    } else {
+      var span = document.createElement("span");
+      span.style.cssText = "color:#94a3b8;font-size:12px";
+      span.textContent = "No logo";
+      preview.appendChild(span);
+      clearBtn.style.display = "none";
+      status.textContent = "Prints at the top of every receipt.";
+      status.style.color = "";
+    }
+  }).catch(function() {});
+}
+
+document.getElementById("logoUploadBtn").addEventListener("click", function() {
+  var btn = this;
+  btn.disabled = true;
+  window.agent.pickLogo().then(function(r) {
+    btn.disabled = false;
+    if (r && r.error) {
+      var status = document.getElementById("logoStatus");
+      status.textContent = r.error;
+      status.style.color = "#dc2626";
+      return;
+    }
+    if (r && r.ok) renderLogo();
+  }).catch(function() { btn.disabled = false; });
+});
+
+document.getElementById("logoClearBtn").addEventListener("click", function() {
+  window.agent.clearLogo().then(function() { renderLogo(); }).catch(function() {});
+});
 
 // ═══════════════════════════════════════════════════════════════
 // ── BIOMETRIC TAB ──────────────────────────────────────────────

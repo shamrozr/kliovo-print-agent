@@ -1,5 +1,7 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import path from "path";
+import fs from "fs";
+import { receiptLogoPath, loadReceiptLogo } from "./print/logo";
 import { createTray, setTrayStatus } from "./tray";
 import { startBridgeServer, setAppVersion } from "./bridge-server";
 import { startPolling } from "./polling";
@@ -123,6 +125,61 @@ ipcMain.handle("offline:sync-now", async () => {
 
 ipcMain.handle("offline:sync-log", () => {
   return getSyncLog();
+});
+
+// ── Receipt logo (managed from the UI, no file-pasting) ──────────────────────
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+function logoInfo(): { hasLogo: boolean; path: string; dataUrl?: string; widthDots?: number; heightDots?: number; valid?: boolean } {
+  const p = receiptLogoPath();
+  try {
+    const buf = fs.readFileSync(p);
+    const raster = loadReceiptLogo(80); // validates + gives print dimensions
+    return {
+      hasLogo: true,
+      path: p,
+      dataUrl: `data:image/png;base64,${buf.toString("base64")}`,
+      widthDots: raster ? raster.widthBytes * 8 : undefined,
+      heightDots: raster?.heightDots,
+      valid: !!raster,
+    };
+  } catch {
+    return { hasLogo: false, path: p };
+  }
+}
+
+ipcMain.handle("logo:get", () => logoInfo());
+
+ipcMain.handle("logo:pick", async () => {
+  const r = await dialog.showOpenDialog({
+    title: "Choose receipt logo",
+    filters: [{ name: "PNG image", extensions: ["png"] }],
+    properties: ["openFile"],
+  });
+  if (r.canceled || !r.filePaths[0]) return { canceled: true };
+  try {
+    const buf = fs.readFileSync(r.filePaths[0]);
+    if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIG)) {
+      return { error: "That file isn't a PNG image. Please choose a .png logo." };
+    }
+    const dest = receiptLogoPath();
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, buf);
+    const info = logoInfo();
+    if (!info.valid) return { error: "Couldn't read that PNG. Try a standard black-and-white PNG." };
+    return { ok: true, info };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+});
+
+ipcMain.handle("logo:clear", () => {
+  try {
+    fs.unlinkSync(receiptLogoPath());
+  } catch {
+    /* already gone */
+  }
+  return { ok: true, info: logoInfo() };
 });
 
 ipcMain.handle("biometric:status", () => {

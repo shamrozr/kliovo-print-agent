@@ -244,6 +244,24 @@
     <div class="section">Cached Data</div>
     <div class="inv-card" id="invCard"></div>
 
+    <!-- Receipt Logo -->
+    <div class="section">Receipt Logo</div>
+    <div class="card">
+      <div style="display:flex;gap:14px;align-items:center">
+        <div id="logoPreview" style="width:120px;height:64px;border:1px solid #e8edf2;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden;flex:none">
+          <span style="color:#94a3b8;font-size:12px">No logo</span>
+        </div>
+        <div style="flex:1">
+          <div class="status" id="logoStatus" style="margin:0 0 8px">Prints at the top of every receipt.</div>
+          <div class="actions">
+            <button class="primary" id="logoUploadBtn">Upload logo…</button>
+            <button class="ghost" id="logoClearBtn" style="display:none">Remove</button>
+          </div>
+          <div class="status" style="margin-top:8px;color:#94a3b8">Black-and-white PNG works best. Auto-scaled to the receipt width.</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Storage -->
     <div class="section">Storage</div>
     <div class="card" id="offStorageCard"></div>
