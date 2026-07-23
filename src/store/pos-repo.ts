@@ -358,7 +358,15 @@ export interface CreateOrderInput {
     comboId?: string | null;
     comboName?: string | null;
     comboPrice?: number | null;
-    picks?: Array<{ groupId?: string; menuItemId?: string; variantId?: string | null; upcharge?: number }>;
+    picks?: Array<{
+      groupId?: string;
+      menuItemId?: string;
+      variantId?: string | null;
+      upcharge?: number;
+      // Per-component addons (the picked item's own modifiers). Persisted inside
+      // combo_picks so reconcile can explode the combo WITH its addons.
+      modifiers?: Array<{ id?: string; name?: string; priceAdjustment?: number }>;
+    }>;
     /** Optional client-supplied brand; when absent the agent derives it from the
      *  combo/menu-item brand (resolveLineBrandId). */
     brandId?: string | null;
@@ -490,7 +498,15 @@ export function addItem(
     comboId?: string | null;
     comboName?: string | null;
     comboPrice?: number | null;
-    picks?: Array<{ groupId?: string; menuItemId?: string; variantId?: string | null; upcharge?: number }>;
+    picks?: Array<{
+      groupId?: string;
+      menuItemId?: string;
+      variantId?: string | null;
+      upcharge?: number;
+      // Per-component addons (the picked item's own modifiers). Persisted inside
+      // combo_picks so reconcile can explode the combo WITH its addons.
+      modifiers?: Array<{ id?: string; name?: string; priceAdjustment?: number }>;
+    }>;
     brandId?: string | null;
   }
 ) {
