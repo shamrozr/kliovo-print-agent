@@ -37,7 +37,7 @@ import {
   getOrder,
 } from "./store/pos-repo";
 import { getAppliedOrderId, recordApplied } from "./store/idempotency";
-import { fireOnCreate, fireOnAddItem, fireReceipt } from "./print/fire";
+import { fireOnCreate, fireOnAddItem, fireReceipt, fireReceiptOnCreate } from "./print/fire";
 
 export const BRIDGE_PORT = 6310;
 
@@ -342,6 +342,7 @@ export function startBridgeServer(): http.Server {
                     const order = createOrder(b) as { id: string };
                     if (key) recordApplied(key, order.id);
                     void fireOnCreate(order.id);
+                    void fireReceiptOnCreate(order.id);
                     return okp({ order });
                   }
                   if (route === "/local/pos/order/pay") {
@@ -362,9 +363,9 @@ export function startBridgeServer(): http.Server {
                       const priorId = getAppliedOrderId(key);
                       if (priorId) return okp({ order: getOrder(priorId), idempotent: true });
                     }
-                    const order = addItem(b.orderId, b.item) as { id: string };
+                    const order = addItem(b.orderId, b.item) as { id: string; addedItemId?: string };
                     if (key) recordApplied(key, order.id);
-                    void fireOnAddItem(order.id);
+                    void fireOnAddItem(order.id, order.addedItemId);
                     return okp({ order });
                   }
                   // TODO(P1): fire void KOT

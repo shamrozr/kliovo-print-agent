@@ -511,7 +511,9 @@ export function addItem(
     logChange("item", orderId, "add_item", { orderId, item: { ...item, id: itemId } });
   });
   tx();
-  return getOrder(orderId);
+  // addedItemId lets the fire path print a KOT for ONLY this new line, never
+  // re-firing earlier items on the order.
+  return { ...getOrder(orderId), addedItemId: itemId };
 }
 
 export function voidItem(orderId: string, itemId: string) {

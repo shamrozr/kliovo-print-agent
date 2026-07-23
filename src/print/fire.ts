@@ -116,9 +116,14 @@ export async function fireOnCreate(orderId: string): Promise<void> {
   }
 }
 
-export async function fireOnAddItem(orderId: string): Promise<void> {
+export async function fireOnAddItem(orderId: string, addedItemId?: string): Promise<void> {
   try {
-    await fireKotsForItems(orderId, pr.getUnfiredItems(orderId));
+    const unfired = pr.getUnfiredItems(orderId);
+    // Fire ONLY the line just added — never re-fire earlier items (which would
+    // reprint the whole running order's KOT). Fall back to all-unfired only when
+    // the caller didn't tell us which item was added.
+    const items = addedItemId ? unfired.filter((i) => i.id === addedItemId) : unfired;
+    await fireKotsForItems(orderId, items);
   } catch (e) {
     logger.error(`[fire] fireOnAddItem ${orderId}: ${(e as Error).message}`);
   }
@@ -146,6 +151,30 @@ export async function fireReceipt(orderId: string, paymentId: string): Promise<v
     await deliverOnce(receiptJobId(orderId, paymentId), target, bytes, `receipt ${orderId}`);
   } catch (e) {
     logger.error(`[fire] fireReceipt ${orderId}: ${(e as Error).message}`);
+  }
+}
+
+/** Print the customer receipt (unpaid bill) when the order is punched — the
+ *  customer copy staff hand over at order time, before payment. Separate ledger
+ *  id from the paid receipt so both can print. */
+export async function fireReceiptOnCreate(orderId: string): Promise<void> {
+  try {
+    const order = pr.getOrderRow(orderId);
+    if (!order) return;
+    const target = resolveReceiptTarget(pr.getMirroredPrinters(), pr.getMirroredRoutes(), order.source || "dine_in");
+    if (!target) {
+      logger.error(`[fire] order ${orderId}: NO active printers — cannot print order receipt`);
+      return;
+    }
+    const items = pr.getOrderItems(orderId);
+    const branding = pr.getBranding();
+    const { time, date } = fmtTime(Date.now());
+    const tableName = pr.getTableName(order.table_id ?? undefined);
+    const input = buildReceiptInput(order, items, [], branding, time, date, tableName, receiptExtras(target.printer.paperWidth));
+    const bytes = renderJob({ kind: "receipt", input }, renderContextFromPrinter(target.printer));
+    await deliverOnce(`OFF:${orderId}:receipt:create`, target, bytes, `receipt ${orderId}`);
+  } catch (e) {
+    logger.error(`[fire] fireReceiptOnCreate ${orderId}: ${(e as Error).message}`);
   }
 }
 
