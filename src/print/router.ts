@@ -72,6 +72,39 @@ function fallbackPrinter(printers: MirroredPrinter[]): MirroredPrinter | null {
   return active.find((p) => p.is_default === 1) ?? active[0];
 }
 
+/** An operator-set local routing override (from the agent's Settings UI). */
+export interface LocalRoute {
+  id: string;
+  station_id?: string | null; // NULL/'*' = kitchen fallback (catch-all KOT)
+  printer_id: string;
+  role?: string; // 'kot' | 'receipt'
+  copies?: number;
+}
+
+/**
+ * Fold operator-set local overrides over the mirrored (web-derived) routes. A
+ * local row REPLACES the mirrored route(s) for the same (role, station) — so the
+ * restaurant can correct a wrong web-derived route without the mirror clobbering
+ * it — while mirrored routes for untouched stations are kept. Local rows sort
+ * first. Pure so it's unit-testable. This is what makes offline routing fully
+ * controllable from the agent regardless of what the snapshot shipped.
+ */
+export function mergeRoutes(local: LocalRoute[], mirrored: MirroredRoute[]): MirroredRoute[] {
+  const key = (role: string | null | undefined, station: string | null | undefined) =>
+    `${role ?? "kot"}::${wildcard(station) ? "*" : station}`;
+  const overridden = new Set(local.map((l) => key(l.role, l.station_id)));
+  const localAsRoutes: MirroredRoute[] = local.map((l) => ({
+    id: `local:${l.id}`,
+    fulfillment_type: null,
+    station_id: l.station_id ?? null,
+    printer_id: l.printer_id,
+    copies: l.copies ?? 1,
+    role: l.role ?? "kot",
+  }));
+  const keptMirrored = mirrored.filter((m) => !overridden.has(key(m.role, m.station_id)));
+  return [...localAsRoutes, ...keptMirrored];
+}
+
 export function resolveKotTargets(
   printers: MirroredPrinter[],
   routes: MirroredRoute[],

@@ -327,6 +327,20 @@ CREATE TABLE IF NOT EXISTS kitchen_stations (
   sort_order INTEGER DEFAULT 0,
   updated_at INTEGER
 );
+-- Operator-set KOT/receipt routing, edited in the agent's Settings UI. NEVER
+-- mirrored (absent from MIRROR_TABLES) so a web snapshot can't clobber it. Takes
+-- precedence over the mirrored print_routing when resolving a KOT/receipt. A row
+-- with station_id NULL/'*' and role 'kot' is the KITCHEN FALLBACK — where any
+-- unmatched ticket goes instead of the cashier default. This is the local safety
+-- net that guarantees offline routing regardless of what the snapshot derived.
+CREATE TABLE IF NOT EXISTS local_print_routing (
+  id         TEXT PRIMARY KEY,
+  station_id TEXT,                 -- NULL/'*' = catch-all (kitchen fallback)
+  printer_id TEXT NOT NULL,
+  role       TEXT DEFAULT 'kot',   -- 'kot' | 'receipt'
+  copies     INTEGER DEFAULT 1,
+  updated_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS print_templates (
   kind          TEXT PRIMARY KEY,
   layout_config TEXT DEFAULT '{}',

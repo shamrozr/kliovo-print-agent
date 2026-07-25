@@ -12,6 +12,7 @@ import { listSystemPrinters } from "./system-printer";
 import { buildLabelTest } from "./render/label-test";
 import { setupAutoUpdater } from "./updater";
 import { initStore, prune } from "./store/db";
+import { getRoutingSnapshot, setLocalRoute, clearLocalRoute } from "./store/print-repo";
 import { initPrintLedger, prunePrintLedger } from "./store/print-ledger";
 import { getOfflineOverview } from "./store/repo";
 import { startCloudSync, verifyDeviceKey, syncNow, getSyncLog } from "./cloud-sync";
@@ -180,6 +181,37 @@ ipcMain.handle("logo:clear", () => {
     /* already gone */
   }
   return { ok: true, info: logoInfo() };
+});
+
+// ── Printer routing (Settings → Printer Routing modal) ───────────────────────
+// Full offline control: view the mirrored (web-derived) routes and override any
+// per station, plus set a KOT fallback printer so nothing lands on the cashier.
+ipcMain.handle("routing:get", () => {
+  try {
+    return { ok: true, ...getRoutingSnapshot() };
+  } catch (e) {
+    // Store not warmed yet (unpaired / not offline-entitled) — surface it so the
+    // modal shows a clear "sync from the web first" state instead of crashing.
+    return { ok: false, error: (e as Error).message, printers: [], stations: [], mirroredRoutes: [], localRoutes: [] };
+  }
+});
+
+ipcMain.handle("routing:set", (_, input: { stationId: string | null; printerId: string; role?: string; copies?: number }) => {
+  try {
+    setLocalRoute(input);
+    return { ok: true, ...getRoutingSnapshot() };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle("routing:clear", (_, input: { stationId: string | null; role?: string }) => {
+  try {
+    clearLocalRoute(input.stationId, input.role);
+    return { ok: true, ...getRoutingSnapshot() };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 });
 
 ipcMain.handle("biometric:status", () => {

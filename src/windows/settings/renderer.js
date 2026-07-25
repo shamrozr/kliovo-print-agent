@@ -1024,6 +1024,7 @@ function loadOfflineData() {
 function refreshOfflineTab() {
   loadOfflineData();
   renderLogo();
+  window.agent.getRouting().then(updateRoutingSummary).catch(function() {});
 }
 
 setInterval(function() { if (activePane === "offline") loadOfflineData(); }, 8000);
@@ -1079,6 +1080,135 @@ document.getElementById("logoUploadBtn").addEventListener("click", function() {
 document.getElementById("logoClearBtn").addEventListener("click", function() {
   window.agent.clearLogo().then(function() { renderLogo(); }).catch(function() {});
 });
+
+// ── Printer routing modal ──────────────────────────────────────
+function routingPrinterName(snap, id) {
+  if (!id) return "";
+  for (var i = 0; i < snap.printers.length; i++) if (snap.printers[i].id === id) return snap.printers[i].name || id;
+  return id;
+}
+function routingLocalPrinter(snap, stationId, role) {
+  var st = (stationId === "*" || !stationId) ? null : stationId;
+  for (var i = 0; i < snap.localRoutes.length; i++) {
+    var r = snap.localRoutes[i];
+    var rSt = (r.station_id === "*" || !r.station_id) ? null : r.station_id;
+    if ((r.role || "kot") === role && rSt === st) return r.printer_id;
+  }
+  return null;
+}
+function routingMirroredPrinter(snap, stationId, role) {
+  for (var i = 0; i < snap.mirroredRoutes.length; i++) {
+    var r = snap.mirroredRoutes[i];
+    if ((r.role || "kot") === role && (r.station_id || null) === (stationId || null)) return r.printer_id;
+  }
+  return null;
+}
+function mkPrinterSelect(snap, firstLabel, selectedId, onPick) {
+  var sel = document.createElement("select");
+  sel.style.cssText = "width:100%;padding:7px 9px;border:1px solid #dfe6ee;border-radius:8px;font:inherit";
+  var first = document.createElement("option");
+  first.value = ""; setText(first, firstLabel);
+  sel.appendChild(first);
+  for (var i = 0; i < snap.printers.length; i++) {
+    var p = snap.printers[i];
+    var o = document.createElement("option");
+    o.value = p.id;
+    setText(o, (p.name || p.id) + (p.connection === "system" ? " · USB" : (p.host ? " · " + p.host : "")));
+    if (p.id === selectedId) o.selected = true;
+    sel.appendChild(o);
+  }
+  if (!selectedId) first.selected = true;
+  sel.addEventListener("change", function() { onPick(sel.value || null); });
+  return sel;
+}
+function routingRow(labelText, subText, selectEl) {
+  var row = document.createElement("div");
+  row.style.cssText = "display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9";
+  var left = document.createElement("div"); left.style.cssText = "flex:1;min-width:0";
+  var name = document.createElement("div"); name.style.cssText = "font-weight:600;font-size:13px"; setText(name, labelText); left.appendChild(name);
+  if (subText) { var sub = document.createElement("div"); sub.style.cssText = "font-size:11px;color:#94a3b8"; setText(sub, subText); left.appendChild(sub); }
+  var right = document.createElement("div"); right.style.cssText = "width:250px;flex:none"; right.appendChild(selectEl);
+  row.appendChild(left); row.appendChild(right);
+  return row;
+}
+function routingStatusMsg(snap) {
+  var s = document.getElementById("routingModalStatus");
+  if (!s) return;
+  if (snap && snap.ok) {
+    s.textContent = "Saved."; s.style.color = "#16a34a";
+    setTimeout(function() { if (s.textContent === "Saved.") s.textContent = ""; }, 1500);
+  } else if (snap && snap.error) { s.textContent = snap.error; s.style.color = "#dc2626"; }
+}
+function applyRoute(input) {
+  window.agent.setRoute(input).then(function(snap) { if (snap && snap.ok) { renderRoutingBody(snap); updateRoutingSummary(snap); } routingStatusMsg(snap); }).catch(function() {});
+}
+function removeRoute(input) {
+  window.agent.clearRoute(input).then(function(snap) { if (snap && snap.ok) { renderRoutingBody(snap); updateRoutingSummary(snap); } routingStatusMsg(snap); }).catch(function() {});
+}
+function renderRoutingBody(snap) {
+  var body = document.getElementById("routingBody");
+  body.replaceChildren();
+  if (!snap || !snap.ok) {
+    var msg = document.createElement("div"); msg.className = "status"; msg.style.color = "#dc2626";
+    setText(msg, (snap && snap.error) ? ("Not ready: " + snap.error) : "Routing unavailable — sync from the web first.");
+    body.appendChild(msg); return;
+  }
+  if (!snap.printers.length) {
+    var m2 = document.createElement("div"); m2.className = "status";
+    setText(m2, "No printers synced yet. Add them in the Printers tab or sync from the web, then reopen this.");
+    body.appendChild(m2); return;
+  }
+  // KOT fallback — the safety net that stops tickets landing on the cashier.
+  var fbSel = mkPrinterSelect(snap, "None — falls back to cashier", routingLocalPrinter(snap, "*", "kot"), function(pid) {
+    if (pid) applyRoute({ stationId: "*", printerId: pid, role: "kot" }); else removeRoute({ stationId: "*", role: "kot" });
+  });
+  body.appendChild(routingRow("KOT fallback printer", "Any kitchen ticket with no station match prints here — set a kitchen printer.", fbSel));
+  // Receipt override.
+  var rcSel = mkPrinterSelect(snap, "Web default", routingLocalPrinter(snap, null, "receipt"), function(pid) {
+    if (pid) applyRoute({ stationId: null, printerId: pid, role: "receipt" }); else removeRoute({ stationId: null, role: "receipt" });
+  });
+  body.appendChild(routingRow("Customer receipt printer", "Override where receipts print offline.", rcSel));
+  // Stations.
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "font-weight:700;font-size:11px;color:#64748b;margin:16px 0 2px;text-transform:uppercase;letter-spacing:.04em";
+  setText(hdr, "Kitchen stations"); body.appendChild(hdr);
+  if (!snap.stations.length) {
+    var ns = document.createElement("div"); ns.className = "status"; ns.style.color = "#94a3b8";
+    setText(ns, "No kitchen stations synced — the KOT fallback above routes every ticket."); body.appendChild(ns);
+  }
+  for (var i = 0; i < snap.stations.length; i++) {
+    (function(st) {
+      var localP = routingLocalPrinter(snap, st.id, "kot");
+      var mirroredP = routingMirroredPrinter(snap, st.id, "kot");
+      var firstLabel = "Web default (" + (mirroredP ? routingPrinterName(snap, mirroredP) : "fallback") + ")";
+      var sel = mkPrinterSelect(snap, firstLabel, localP, function(pid) {
+        if (pid) applyRoute({ stationId: st.id, printerId: pid, role: "kot" }); else removeRoute({ stationId: st.id, role: "kot" });
+      });
+      var sub = localP ? "Overridden locally." : (mirroredP ? "Using web route." : "No web route — uses the fallback above.");
+      body.appendChild(routingRow(st.label || st.name || st.id, sub, sel));
+    })(snap.stations[i]);
+  }
+}
+function updateRoutingSummary(snap) {
+  var s = document.getElementById("routingSummary");
+  if (!s || !snap || !snap.ok) return;
+  var n = (snap.localRoutes || []).length;
+  s.textContent = n > 0
+    ? (n + " local override" + (n === 1 ? "" : "s") + " set.")
+    : "Control which printer each kitchen station's KOT prints on when offline.";
+}
+function openRoutingModal() {
+  var bg = document.getElementById("routingModalBg");
+  bg.style.display = "flex";
+  var body = document.getElementById("routingBody");
+  body.replaceChildren();
+  var loading = document.createElement("div"); loading.className = "status"; loading.style.color = "#94a3b8"; setText(loading, "Loading…"); body.appendChild(loading);
+  window.agent.getRouting().then(function(snap) { renderRoutingBody(snap); updateRoutingSummary(snap); }).catch(function() { renderRoutingBody(null); });
+}
+function closeRoutingModal() { document.getElementById("routingModalBg").style.display = "none"; }
+document.getElementById("routingOpenBtn").addEventListener("click", openRoutingModal);
+document.getElementById("routingCloseBtn").addEventListener("click", closeRoutingModal);
+document.getElementById("routingModalBg").addEventListener("click", function(e) { if (e.target === this) closeRoutingModal(); });
 
 // ═══════════════════════════════════════════════════════════════
 // ── BIOMETRIC TAB ──────────────────────────────────────────────

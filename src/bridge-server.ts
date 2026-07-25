@@ -37,6 +37,7 @@ import {
   getOrder,
 } from "./store/pos-repo";
 import { getAppliedOrderId, recordApplied } from "./store/idempotency";
+import { getPrintDiagnostics } from "./store/print-repo";
 import { fireOnCreate, fireOnAddItem, fireReceipt, fireReceiptOnCreate } from "./print/fire";
 
 export const BRIDGE_PORT = 6310;
@@ -122,6 +123,18 @@ export function startBridgeServer(): http.Server {
     // recent activity without tailing the agent log.
     if (req.method === "GET" && req.url === "/status") {
       send(200, { ok: true, version: appVersion, credentialsSyncedAt: getCredentialsSyncedAt(), ...getHealthSnapshot() });
+      return;
+    }
+
+    // Read-only routing diagnostics — printers, mirrored + local routes, stations,
+    // and station coverage on recent offline items. Open in a browser on the till
+    // to see exactly why KOTs route where they do. No secrets (no keys/hashes).
+    if (req.method === "GET" && req.url === "/local/print-diag") {
+      try {
+        send(200, { ok: true, ...getPrintDiagnostics() });
+      } catch (e) {
+        send(200, { ok: false, error: (e as Error).message });
+      }
       return;
     }
 

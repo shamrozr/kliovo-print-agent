@@ -264,6 +264,27 @@ function resolveLineBrandId(
   return null;
 }
 
+/**
+ * Derive a line's kitchen station from its menu item when the client didn't
+ * supply one. WHY THIS MATTERS: KOT routing is station-specific (Dine derives one
+ * route per station). An order item stored with a NULL station matches no route
+ * and drops to the default printer — the cashier — so kitchen tickets never reach
+ * the kitchen/bar (network) printers. Older Aster builds don't send stationId, so
+ * the agent (source of truth on write) fills it here from the mirrored menu item.
+ * Combos carry no single menu_item_id → null (their picks span multiple stations;
+ * per-pick KOT splitting is a separate feature).
+ */
+function resolveLineStationId(
+  d: ReturnType<typeof getStore>,
+  item: { menuItemId?: string | null }
+): string | null {
+  if (item.menuItemId) {
+    const r = d.prepare("SELECT station_id FROM menu_items WHERE id = ?").get(item.menuItemId) as { station_id?: string | null } | undefined;
+    return r?.station_id ?? null;
+  }
+  return null;
+}
+
 // ── Payment + order config (synced from the tenant) ──────────
 export function getPaymentConfig() {
   const d = getStore();
@@ -445,7 +466,7 @@ export function createOrder(input: CreateOrderInput) {
         mods: JSON.stringify(mods),
         notes: it.notes ?? null,
         course: it.course ?? null,
-        station: it.stationId ?? null,
+        station: it.stationId ?? resolveLineStationId(d, it),
         sort: i,
         ts,
         comboId: it.comboId ?? null,
@@ -520,7 +541,7 @@ export function addItem(
       `INSERT INTO order_items (id, order_id, menu_item_id, name, quantity, unit_price, total_price, modifiers, notes, station_id, kitchen_status, sort_order, created_at, combo_id, combo_name, combo_price, combo_picks, brand_id)
        VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?)`
     ).run(itemId, orderId, item.menuItemId ?? null, item.name, item.quantity, item.unitPrice,
-      (item.unitPrice + modTotal) * item.quantity, JSON.stringify(mods), item.notes ?? null, item.stationId ?? null, count, now(),
+      (item.unitPrice + modTotal) * item.quantity, JSON.stringify(mods), item.notes ?? null, item.stationId ?? resolveLineStationId(d, item), count, now(),
       item.comboId ?? null, item.comboName ?? null, item.comboPrice ?? null, item.picks ? JSON.stringify(item.picks) : null,
       item.brandId ?? resolveLineBrandId(d, item));
     recalc(orderId);

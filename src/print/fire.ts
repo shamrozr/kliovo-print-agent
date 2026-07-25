@@ -69,7 +69,7 @@ async function fireKotsForItems(orderId: string, items: pr_ItemRow[]): Promise<v
   const order = pr.getOrderRow(orderId);
   if (!order) return;
   const printers = pr.getMirroredPrinters();
-  const routes = pr.getMirroredRoutes();
+  const routes = pr.getEffectiveRoutes();
   const ft = order.source || "dine_in";
   const tableName = pr.getTableName(order.table_id ?? undefined);
   const { time, date } = fmtTime(order.created_at || Date.now());
@@ -85,6 +85,13 @@ async function fireKotsForItems(orderId: string, items: pr_ItemRow[]): Promise<v
   let seq = Date.now();
   for (const [stationId, stationItems] of byStation) {
     const targets = resolveKotTargets(printers, routes, ft, stationId);
+    // Routing trace — makes "why did this KOT go to the cashier?" answerable from
+    // the log alone: shows the item's station, how many routes were available,
+    // the chosen printer, and whether it was a real match or the default fallback.
+    logger.info(
+      `[fire] KOT route: order=${orderId} station=${stationId ?? "∅(null)"} items=${stationItems.length} ` +
+        `routes=${routes.length} → ${targets.map((t) => `${t.printer.name}${t.fallback ? "(FALLBACK)" : ""}`).join(", ") || "NONE"}`
+    );
     if (targets.length === 0) {
       logger.error(`[fire] order ${orderId} station ${stationId}: NO active printers — cannot print KOT`);
       continue;
@@ -134,7 +141,7 @@ export async function fireReceipt(orderId: string, paymentId: string): Promise<v
     const order = pr.getOrderRow(orderId);
     if (!order) return;
     const printers = pr.getMirroredPrinters();
-    const routes = pr.getMirroredRoutes();
+    const routes = pr.getEffectiveRoutes();
     const target = resolveReceiptTarget(printers, routes, order.source || "dine_in");
     if (!target) {
       logger.error(`[fire] order ${orderId}: NO active printers — cannot print receipt`);
@@ -161,7 +168,7 @@ export async function fireReceiptOnCreate(orderId: string): Promise<void> {
   try {
     const order = pr.getOrderRow(orderId);
     if (!order) return;
-    const target = resolveReceiptTarget(pr.getMirroredPrinters(), pr.getMirroredRoutes(), order.source || "dine_in");
+    const target = resolveReceiptTarget(pr.getMirroredPrinters(), pr.getEffectiveRoutes(), order.source || "dine_in");
     if (!target) {
       logger.error(`[fire] order ${orderId}: NO active printers — cannot print order receipt`);
       return;
@@ -182,7 +189,7 @@ export async function fireReceiptOnCreate(orderId: string): Promise<void> {
 export async function reprintReceipt(orderId: string): Promise<{ ok: boolean; error?: string }> {
   const order = pr.getOrderRow(orderId);
   if (!order) return { ok: false, error: "order not found" };
-  const target = resolveReceiptTarget(pr.getMirroredPrinters(), pr.getMirroredRoutes(), order.source || "dine_in");
+  const target = resolveReceiptTarget(pr.getMirroredPrinters(), pr.getEffectiveRoutes(), order.source || "dine_in");
   if (!target) return { ok: false, error: "no active printer" };
   const branding = pr.getBranding();
   const { time, date } = fmtTime(Date.now());
@@ -202,7 +209,7 @@ export async function reprintKot(orderId: string, stationId: string | null): Pro
   if (!order) return { ok: false, error: "order not found" };
   const items = pr.getOrderItems(orderId).filter((i) => (i.station_id ?? null) === stationId);
   if (items.length === 0) return { ok: false, error: "no items for station" };
-  const targets = resolveKotTargets(pr.getMirroredPrinters(), pr.getMirroredRoutes(), order.source || "dine_in", stationId);
+  const targets = resolveKotTargets(pr.getMirroredPrinters(), pr.getEffectiveRoutes(), order.source || "dine_in", stationId);
   if (targets.length === 0) return { ok: false, error: "no active printer" };
   const station = pr.getStation(stationId);
   const { time, date } = fmtTime(order.created_at || Date.now());
