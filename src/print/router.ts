@@ -72,6 +72,40 @@ function fallbackPrinter(printers: MirroredPrinter[]): MirroredPrinter | null {
   return active.find((p) => p.is_default === 1) ?? active[0];
 }
 
+/**
+ * Heal each mirrored printer's CONNECTION (how to reach it — host/port/system
+ * name) from the agent's LOCAL config, matched by id then by name. The local
+ * config is authoritative for connectivity: it's what the operator set up and
+ * proved with test-print, whereas the web-mirrored host can be blank or stale
+ * (Dine only fills host when the connection string carries a ":port"). Config
+ * printers with no mirrored twin are appended so they're routable too. Pure.
+ *
+ * This is why offline printing no longer depends on the web shipping a correct
+ * host — the KOT resolves WHICH printer via routing, but HOW to reach it comes
+ * from the agent's own config.
+ */
+export function resolvePrinters(configPrinters: MirroredPrinter[], mirrored: MirroredPrinter[]): MirroredPrinter[] {
+  const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+  const byId = new Map(configPrinters.map((c) => [c.id, c]));
+  const byName = new Map(configPrinters.filter((c) => norm(c.name)).map((c) => [norm(c.name), c]));
+  const used = new Set<string>();
+  const healed = mirrored.map((m) => {
+    const match = byId.get(m.id) ?? byName.get(norm(m.name));
+    if (!match) return m;
+    used.add(match.id);
+    // Config wins for HOW to reach it; keep the mirrored identity + flags.
+    return {
+      ...m,
+      connection: match.connection,
+      host: match.host,
+      port: match.port,
+      system_printer_name: match.system_printer_name,
+    };
+  });
+  const extra = configPrinters.filter((c) => !used.has(c.id) && !mirrored.some((m) => m.id === c.id));
+  return [...healed, ...extra];
+}
+
 /** An operator-set local routing override (from the agent's Settings UI). */
 export interface LocalRoute {
   id: string;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeRoutes, resolveKotTargets, resolveReceiptTarget, toPrinterEntry, type MirroredPrinter, type MirroredRoute } from "./router";
+import { mergeRoutes, resolvePrinters, resolveKotTargets, resolveReceiptTarget, toPrinterEntry, type MirroredPrinter, type MirroredRoute } from "./router";
 
 const kitchen: MirroredPrinter = { id: "pk", name: "Kitchen", connection: "network", host: "10.0.0.5", port: 9100, is_active: 1 };
 const bar: MirroredPrinter = { id: "pb", name: "Bar", connection: "network", host: "10.0.0.6", port: 9100, is_active: 1 };
@@ -85,6 +85,32 @@ describe("resolveKotTargets", () => {
       expect(t[0].printer.printerId).toBe("pc"); // cashier default
       expect(t[0].fallback).toBe(true); // flagged: nothing matched
     });
+  });
+});
+
+describe("resolvePrinters (agent config is authoritative for the connection)", () => {
+  it("heals a mirrored printer's blank host from the config printer of the same name", () => {
+    const mirrored: MirroredPrinter[] = [{ id: "web-kot", name: "Kitchen", connection: "network", host: undefined, port: undefined, is_active: 1 }];
+    const config: MirroredPrinter[] = [{ id: "cfg-kot", name: "Kitchen", connection: "network", host: "192.168.1.89", port: 9100, is_active: 1 }];
+    const out = resolvePrinters(config, mirrored);
+    const kitchen = out.find((p) => p.id === "web-kot");
+    expect(kitchen?.host).toBe("192.168.1.89"); // healed from config
+    expect(kitchen?.port).toBe(9100);
+    // The routed KOT now delivers to a real host instead of ":9100".
+    expect(toPrinterEntry(kitchen!).host).toBe("192.168.1.89");
+    // No duplicate — the config printer was consumed by the name match.
+    expect(out).toHaveLength(1);
+  });
+
+  it("adds a config-only printer so it is routable, and prefers config host by id match", () => {
+    const mirrored: MirroredPrinter[] = [{ id: "p1", name: "Bar", host: "10.0.0.1", port: 9100, is_active: 1 }];
+    const config: MirroredPrinter[] = [
+      { id: "p1", name: "Bar", connection: "network", host: "192.168.1.50", port: 9100, is_active: 1 }, // id match → wins
+      { id: "p2", name: "Grill", connection: "network", host: "192.168.1.51", port: 9100, is_active: 1 }, // config-only
+    ];
+    const out = resolvePrinters(config, mirrored);
+    expect(out.find((p) => p.id === "p1")?.host).toBe("192.168.1.50");
+    expect(out.find((p) => p.id === "p2")?.host).toBe("192.168.1.51"); // appended
   });
 });
 

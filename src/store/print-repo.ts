@@ -4,7 +4,8 @@
  */
 import { getStore } from "./db";
 import type { OrderRow, ItemRow, StationRow, BrandingRow } from "../print/render-map";
-import { mergeRoutes, type LocalRoute, type MirroredPrinter, type MirroredRoute } from "../print/router";
+import { mergeRoutes, resolvePrinters, type LocalRoute, type MirroredPrinter, type MirroredRoute } from "../print/router";
+import { loadConfig } from "../config";
 import type { LayoutConfig } from "../render/designer-types";
 
 /** Mirrored designer template for a document kind (e.g. "receipt"). Returns the
@@ -54,6 +55,35 @@ export function getPayment(orderId: string, paymentId: string): { id: string; me
 
 export function getMirroredPrinters(): MirroredPrinter[] {
   return getStore().prepare("SELECT * FROM printers").all() as MirroredPrinter[];
+}
+
+/** The agent's LOCALLY-configured printers (config.json) as MirroredPrinter rows.
+ *  These hold the real, operator-verified host/port that test-print uses. */
+function getConfigPrinters(): MirroredPrinter[] {
+  try {
+    return (loadConfig().printers ?? []).map((p) => ({
+      id: p.printerId,
+      name: p.name,
+      connection: p.connection === "system" ? "system" : "network",
+      host: p.host,
+      port: p.port,
+      system_printer_name: p.systemPrinterName,
+      paper_width: p.paperWidth,
+      printer_mode: p.printerMode,
+      is_default: 0,
+      is_active: 1,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** Printers the fire path + routing UI resolve against: mirrored printers healed
+ *  with the agent's local connection details (host/port), plus any config-only
+ *  printer. So a KOT reaches the printer via the agent's own config, never a
+ *  blank web-mirrored host. */
+export function getResolvablePrinters(): MirroredPrinter[] {
+  return resolvePrinters(getConfigPrinters(), getMirroredPrinters());
 }
 
 export function getMirroredRoutes(): MirroredRoute[] {
@@ -113,9 +143,11 @@ export function getPrintDiagnostics() {
  *  effective printer per station and let each be overridden. */
 export function getRoutingSnapshot() {
   const d = getStore();
-  const printers = d
-    .prepare("SELECT id, name, connection, host, port, printer_mode, is_default, is_active FROM printers ORDER BY is_default DESC, name")
-    .all();
+  // Resolvable printers carry the agent's real host/port (healed from config), so
+  // the modal shows and routes to reachable printers, not blank web hosts.
+  const printers = getResolvablePrinters()
+    .map((p) => ({ id: p.id, name: p.name, connection: p.connection, host: p.host, port: p.port, printer_mode: p.printer_mode, is_default: p.is_default, is_active: p.is_active }))
+    .sort((a, b) => (b.is_default ?? 0) - (a.is_default ?? 0) || String(a.name).localeCompare(String(b.name)));
   const stations = d.prepare("SELECT id, name, label FROM kitchen_stations ORDER BY sort_order, name").all();
   return {
     printers,
