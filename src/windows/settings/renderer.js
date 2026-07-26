@@ -1394,8 +1394,17 @@ function pollBiometricStatus() {
       var lbl = document.createElement("span");
       lbl.textContent = d.name;
       var st = document.createElement("span");
-      st.style.cssText = "margin-left:auto;font-size:11px;color:#94a3b8";
-      st.textContent = d.connected ? "polling" : "disconnected";
+      st.style.cssText = "margin-left:auto;font-size:11px;color:#94a3b8;text-align:right";
+      if (d.connected) {
+        st.textContent = "online — last seen " + fmtTime(d.lastSuccessAt);
+      } else if (d.lastErrorAt) {
+        st.textContent = "offline since " + fmtTime(d.lastErrorAt) +
+          (d.lastError ? " (" + d.lastError + ")" : "") +
+          (d.consecutiveFailures > 1 ? " · " + d.consecutiveFailures + " failed attempts" : "");
+        st.style.color = "#dc2626";
+      } else {
+        st.textContent = "not yet connected";
+      }
       row.append(dot, lbl, st);
       statusEl.appendChild(row);
     });

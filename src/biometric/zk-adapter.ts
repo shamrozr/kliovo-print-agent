@@ -66,6 +66,35 @@ interface ZkPoller {
 const activePollers = new Map<string, ZkPoller>();
 const resolvedSerials = new Map<string, string>(); // config device id -> hardware serial
 
+interface DeviceHealth {
+  lastSuccessAt: string | null;
+  lastErrorAt: string | null;
+  lastError: string | null;
+  consecutiveFailures: number;
+}
+const deviceHealth = new Map<string, DeviceHealth>(); // config device id -> health
+
+function getHealth(deviceId: string): DeviceHealth {
+  let h = deviceHealth.get(deviceId);
+  if (!h) {
+    h = { lastSuccessAt: null, lastErrorAt: null, lastError: null, consecutiveFailures: 0 };
+    deviceHealth.set(deviceId, h);
+  }
+  return h;
+}
+
+// A device only counts as "connected" if we actually reached it recently — NOT
+// just because its polling loop is running. The loop keeps retrying forever on
+// failure (with backoff), so "loop alive" stays true for hours after a device
+// goes unreachable. Recency is judged against the device's own poll interval,
+// since a slower-polling device would otherwise look "offline" between its
+// normal, healthy checks.
+function isHealthy(h: DeviceHealth, pollIntervalMs: number): boolean {
+  if (!h.lastSuccessAt) return false;
+  const staleAfter = Math.max(pollIntervalMs * 2, 60_000);
+  return Date.now() - new Date(h.lastSuccessAt).getTime() < staleAfter;
+}
+
 // Timestamp of the last time ANY device's punch log was successfully read.
 // This is the "auto-fetch is alive" heartbeat — distinct from last-push
 // (getLastSyncAt), which only advances when there were new punches to send.
@@ -141,10 +170,20 @@ export async function startZkPolling(
         logger.info(`[zk] ${device.name}: ${queued} new punch(es) queued (device log: ${logs.length})`);
       }
 
+      const health = getHealth(device.id);
+      health.lastSuccessAt = lastScanAt;
+      health.lastError = null;
+      health.consecutiveFailures = 0;
+
       // Reset backoff on success
       backoffMs = interval;
     } catch (e) {
-      logger.warn(`[zk] ${device.name} poll failed:`, zkErrorMessage(e));
+      const msg = zkErrorMessage(e);
+      logger.warn(`[zk] ${device.name} poll failed:`, msg);
+      const health = getHealth(device.id);
+      health.lastErrorAt = new Date().toISOString();
+      health.lastError = msg;
+      health.consecutiveFailures++;
       backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF);
     } finally {
       if (zk) {
@@ -217,10 +256,19 @@ export async function pollDeviceOnce(device: BiometricDeviceEntry): Promise<{
     }
     logger.info(`[zk] ${device.name}: manual pull queued ${queued} new punch(es) (device log: ${logs.length})`);
 
+    const health = getHealth(device.id);
+    health.lastSuccessAt = lastScanAt;
+    health.lastError = null;
+    health.consecutiveFailures = 0;
+
     return { ok: true, deviceSerial: effectiveSerial, totalLogs: logs.length, newPunches: queued };
   } catch (e) {
     const msg = zkErrorMessage(e);
     logger.warn(`[zk] ${device.name}: manual pull failed:`, msg);
+    const health = getHealth(device.id);
+    health.lastErrorAt = new Date().toISOString();
+    health.lastError = msg;
+    health.consecutiveFailures++;
     return { ok: false, error: msg };
   } finally {
     if (zk) await zk.disconnect().catch(() => {});
@@ -260,15 +308,31 @@ export function stopAllBiometricDevices(): void {
   activePollers.clear();
 }
 
-export function getDeviceStatuses(): Array<{ id: string; name: string; connected: boolean; serial?: string }> {
+export function getDeviceStatuses(): Array<{
+  id: string;
+  name: string;
+  connected: boolean;
+  serial?: string;
+  lastSuccessAt: string | null;
+  lastErrorAt: string | null;
+  lastError: string | null;
+  consecutiveFailures: number;
+}> {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { loadConfig } = require("../config") as { loadConfig: () => import("../config").AgentConfig };
   const config = loadConfig();
   const devices = config.biometricDevices ?? [];
-  return devices.map((d) => ({
-    id: d.id,
-    name: d.name,
-    connected: d.enabled && activePollers.has(d.id),
-    serial: resolvedSerials.get(d.id) ?? d.serial,
-  }));
+  return devices.map((d) => {
+    const health = getHealth(d.id);
+    return {
+      id: d.id,
+      name: d.name,
+      connected: !!d.enabled && activePollers.has(d.id) && isHealthy(health, d.pollIntervalMs ?? 15_000),
+      serial: resolvedSerials.get(d.id) ?? d.serial,
+      lastSuccessAt: health.lastSuccessAt,
+      lastErrorAt: health.lastErrorAt,
+      lastError: health.lastError,
+      consecutiveFailures: health.consecutiveFailures,
+    };
+  });
 }
