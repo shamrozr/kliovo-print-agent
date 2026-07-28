@@ -59,6 +59,14 @@ async function ackJob(
     });
     if (!res.ok) {
       logger.warn(`[ack] ${printJobId} HTTP ${res.status}`);
+      // A definitive rejection (bad/unknown job id, revoked key) will never
+      // succeed on retry. Leaving it pending made flushPendingAcks() replay it
+      // on every tick forever — thousands of agents' dead acks compounded into
+      // a request storm that pegged the prod app CPU (2026-07-28). Drop it;
+      // only network failures and 5xx/429 are worth retrying.
+      if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+        markAcked(printJobId);
+      }
       return false;
     }
     markAcked(printJobId);
