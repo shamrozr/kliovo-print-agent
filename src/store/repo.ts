@@ -513,6 +513,9 @@ interface PushOrderPayload {
    *  maps these to fields.deliveryAddress and deliveryCostPaisa. */
   deliveryAddress?: string | null;
   deliveryFee?: number;
+  /** Per-order-type charges auto-applied offline (service fee, GST…). Reconcile
+   *  persists them to fields.appliedCharges + serviceChargeAmount, like online. */
+  appliedCharges?: Array<{ id: string; name: string; type: string; value: number; amount: number }>;
   items: Array<Record<string, unknown>>;
   payments: Array<Record<string, unknown>>;
   totals: { totalAmount: number; paidAmount: number };
@@ -555,6 +558,7 @@ export function getOfflineOrdersForPush(): { orderId: string; payload: PushOrder
       discountAmount: Number(o.discount_amount) || 0,
       deliveryAddress: typeof ofields.deliveryAddress === "string" ? ofields.deliveryAddress : null,
       deliveryFee: Math.max(0, Number(ofields.deliveryFee) || 0),
+      appliedCharges: Array.isArray(ofields.appliedCharges) ? ofields.appliedCharges : [],
       items: items.map((it) => {
         if (it.combo_id) {
           let picks: unknown[] = [];

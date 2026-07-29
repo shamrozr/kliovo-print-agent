@@ -297,6 +297,7 @@ export function getPaymentConfig() {
     methodDefs: read("payment_method_defs"),    // [{ key, label, flags... }]
     orderConfig: read("order_config"),          // { taxRate, serviceChargeRate, currency }
     disabledTabs: read("disabled_tabs"),
+    charges: read("charges"),                   // [{ id, name, type, value, appliesTo, defaultOn }] — per-order-type
   };
 }
 

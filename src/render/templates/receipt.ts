@@ -83,6 +83,9 @@ export interface ReceiptInput {
   discounts?: { label: string; amountPaisa: number; percentage?: number }[];
   taxes?: { label: string; rate: number; amountPaisa: number }[];
   serviceChargePaisa?: number;
+  /** Named per-order-type charges (service fee, GST…), each on its own line.
+   *  When present, the aggregate serviceChargePaisa line is suppressed. */
+  charges?: { label: string; amountPaisa: number }[];
   /** Manual per-order delivery fee (Aster). Prints as its own "Delivery" line.
    *  Optional — online receipts that don't set it render exactly as before. */
   deliveryFeePaisa?: number;
@@ -186,7 +189,12 @@ export function renderReceipt(input: ReceiptInput): Buffer {
   for (const t of input.taxes ?? []) {
     b.row(`${t.label} (${t.rate}%)`, formatMoney(t.amountPaisa), pw);
   }
-  if (input.serviceChargePaisa) b.row("Service", formatMoney(input.serviceChargePaisa), pw);
+  // Per-charge lines (service fee, GST…) when present; else the aggregate line.
+  if (input.charges && input.charges.length > 0) {
+    for (const c of input.charges) b.row(c.label, formatMoney(c.amountPaisa), pw);
+  } else if (input.serviceChargePaisa) {
+    b.row("Service", formatMoney(input.serviceChargePaisa), pw);
+  }
   if (input.deliveryFeePaisa) b.row("Delivery", formatMoney(input.deliveryFeePaisa), pw);
   if (input.tipPaisa) b.row("Tip", formatMoney(input.tipPaisa), pw);
 

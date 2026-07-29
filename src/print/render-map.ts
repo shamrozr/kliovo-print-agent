@@ -144,6 +144,11 @@ export function buildReceiptInput(
   }
   const deliveryAddress = typeof fields.deliveryAddress === "string" ? fields.deliveryAddress : undefined;
   const deliveryFeePaisa = toPaisa(Number(fields.deliveryFee) || 0) || undefined;
+  // Named charges (service fee, GST…) — one receipt line each, matching the web.
+  const appliedCharges = Array.isArray(fields.appliedCharges) ? (fields.appliedCharges as Array<{ name?: string; amount?: number }>) : [];
+  const chargeLines = appliedCharges
+    .filter((c) => Number(c.amount) > 0)
+    .map((c) => ({ label: String(c.name || "Charge"), amountPaisa: toPaisa(Number(c.amount) || 0) }));
   const customerName = order.guest_name ?? undefined;
   const customerPhone = order.guest_phone ?? undefined;
   return {
@@ -173,7 +178,10 @@ export function buildReceiptInput(
     subtotalPaisa,
     discounts: discountPaisa > 0 ? [{ label: "Discount", amountPaisa: discountPaisa }] : undefined,
     taxes: taxPaisa > 0 ? [{ label: "Tax", rate: 0, amountPaisa: taxPaisa }] : undefined,
-    serviceChargePaisa: toPaisa(order.service_charge_amount) || undefined,
+    // Prefer itemized charge lines; fall back to the aggregate service line only
+    // when there are no named charges (legacy flat serviceChargeRate path).
+    charges: chargeLines.length > 0 ? chargeLines : undefined,
+    serviceChargePaisa: chargeLines.length > 0 ? undefined : toPaisa(order.service_charge_amount) || undefined,
     deliveryFeePaisa,
     totalPaisa,
     paidPaisa,
