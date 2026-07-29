@@ -509,6 +509,10 @@ interface PushOrderPayload {
   taxRate?: number;
   serviceChargeRate?: number;
   discountAmount?: number;
+  /** Free-text delivery address + manual delivery fee (Aster). The web reconcile
+   *  maps these to fields.deliveryAddress and deliveryCostPaisa. */
+  deliveryAddress?: string | null;
+  deliveryFee?: number;
   items: Array<Record<string, unknown>>;
   payments: Array<Record<string, unknown>>;
   totals: { totalAmount: number; paidAmount: number };
@@ -530,6 +534,12 @@ export function getOfflineOrdersForPush(): { orderId: string; payload: PushOrder
     const subtotal = Number(o.subtotal) || 0;
     const taxRate = subtotal > 0 ? (Number(o.tax_amount) / subtotal) * 100 : 0;
     const scRate = subtotal > 0 ? (Number(o.service_charge_amount) / subtotal) * 100 : 0;
+    let ofields: Record<string, any> = {};
+    try {
+      ofields = o.fields ? JSON.parse(o.fields) : {};
+    } catch {
+      ofields = {};
+    }
 
     const payload: PushOrderPayload = {
       offlineRef: o.reference,
@@ -543,6 +553,8 @@ export function getOfflineOrdersForPush(): { orderId: string; payload: PushOrder
       taxRate,
       serviceChargeRate: scRate,
       discountAmount: Number(o.discount_amount) || 0,
+      deliveryAddress: typeof ofields.deliveryAddress === "string" ? ofields.deliveryAddress : null,
+      deliveryFee: Math.max(0, Number(ofields.deliveryFee) || 0),
       items: items.map((it) => {
         if (it.combo_id) {
           let picks: unknown[] = [];

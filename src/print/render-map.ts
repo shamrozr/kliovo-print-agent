@@ -16,6 +16,7 @@ export interface OrderRow {
   source?: string;
   table_id?: string | null;
   guest_name?: string | null;
+  guest_phone?: string | null;
   covers?: number | null;
   fields?: string;
   subtotal?: number;
@@ -124,6 +125,7 @@ export function buildReceiptInput(
 ): ReceiptInput {
   const subtotalPaisa = toPaisa(order.subtotal);
   const taxPaisa = toPaisa(order.tax_amount);
+  const discountPaisa = toPaisa(order.discount_amount);
   const totalPaisa = toPaisa(order.total_amount);
   const paidPaisa = toPaisa(order.paid_amount);
   let taxLines: string[] = [];
@@ -132,6 +134,18 @@ export function buildReceiptInput(
   } catch {
     taxLines = [];
   }
+  // Customer + delivery live in the order's `fields` JSON (same shape Dine reads
+  // on reconcile: deliveryAddress + a manual deliveryFee). Parse defensively.
+  let fields: Record<string, unknown> = {};
+  try {
+    fields = order.fields ? (JSON.parse(order.fields) as Record<string, unknown>) : {};
+  } catch {
+    fields = {};
+  }
+  const deliveryAddress = typeof fields.deliveryAddress === "string" ? fields.deliveryAddress : undefined;
+  const deliveryFeePaisa = toPaisa(Number(fields.deliveryFee) || 0) || undefined;
+  const customerName = order.guest_name ?? undefined;
+  const customerPhone = order.guest_phone ?? undefined;
   return {
     header: {
       tenantName: branding?.name || "Receipt",
@@ -146,6 +160,8 @@ export function buildReceiptInput(
     orderType: orderType(order),
     tableName,
     covers: order.covers ?? undefined,
+    customer: customerName || customerPhone ? { name: customerName, phone: customerPhone } : undefined,
+    deliveryAddress,
     items: items.map((it) => ({
       name: it.name || "Item",
       quantity: Number(it.quantity) || 1,
@@ -155,8 +171,10 @@ export function buildReceiptInput(
       notes: it.notes ?? undefined,
     })),
     subtotalPaisa,
+    discounts: discountPaisa > 0 ? [{ label: "Discount", amountPaisa: discountPaisa }] : undefined,
     taxes: taxPaisa > 0 ? [{ label: "Tax", rate: 0, amountPaisa: taxPaisa }] : undefined,
     serviceChargePaisa: toPaisa(order.service_charge_amount) || undefined,
+    deliveryFeePaisa,
     totalPaisa,
     paidPaisa,
     balanceDuePaisa: Math.max(0, totalPaisa - paidPaisa),

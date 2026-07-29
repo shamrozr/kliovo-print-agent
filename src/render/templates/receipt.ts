@@ -83,6 +83,9 @@ export interface ReceiptInput {
   discounts?: { label: string; amountPaisa: number; percentage?: number }[];
   taxes?: { label: string; rate: number; amountPaisa: number }[];
   serviceChargePaisa?: number;
+  /** Manual per-order delivery fee (Aster). Prints as its own "Delivery" line.
+   *  Optional — online receipts that don't set it render exactly as before. */
+  deliveryFeePaisa?: number;
   tipPaisa?: number;
   totalPaisa: number;
   paidPaisa: number;
@@ -184,6 +187,7 @@ export function renderReceipt(input: ReceiptInput): Buffer {
     b.row(`${t.label} (${t.rate}%)`, formatMoney(t.amountPaisa), pw);
   }
   if (input.serviceChargePaisa) b.row("Service", formatMoney(input.serviceChargePaisa), pw);
+  if (input.deliveryFeePaisa) b.row("Delivery", formatMoney(input.deliveryFeePaisa), pw);
   if (input.tipPaisa) b.row("Tip", formatMoney(input.tipPaisa), pw);
 
   b.rule(pw, "=");

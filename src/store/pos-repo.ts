@@ -334,16 +334,20 @@ function recalc(orderId: string): void {
     o.discount_amount ?? 0,
     (fields.appliedCharges ?? []) as AppliedCharge[]
   );
+  // Keep the manual delivery fee on the total across re-totals (payment, add-item)
+  // — computeTotals doesn't know about it, so fold it back in here too.
+  const deliveryFee = Math.max(0, Number(fields.deliveryFee) || 0);
+  const orderTotal = totals.totalAmount + deliveryFee;
   const pays = d.prepare("SELECT * FROM order_payments WHERE order_id = ?").all(orderId) as any[];
   const corePays: CorePayment[] = pays.map((p) => ({ amount: p.amount, isRefunded: !!p.is_refunded }));
-  const pt = recomputePaymentTotals(corePays, totals.totalAmount);
+  const pt = recomputePaymentTotals(corePays, orderTotal);
   d.prepare(
     "UPDATE orders SET subtotal=?, tax_amount=?, service_charge_amount=?, total_amount=?, paid_amount=?, balance_due=?, payment_status=?, updated_at=? WHERE id=?"
   ).run(
     totals.subtotal,
     totals.taxAmount,
     totals.serviceChargeAmount,
-    totals.totalAmount,
+    orderTotal,
     pt.paidAmount,
     pt.balanceDue,
     pt.paymentStatus,
@@ -361,6 +365,12 @@ export interface CreateOrderInput {
   tableId?: string | null;
   guestName?: string | null;
   guestPhone?: string | null;
+  /** Free-text delivery address (Aster). Stored in fields.deliveryAddress — the
+   *  same key Dine's receipt + reconcile read. */
+  deliveryAddress?: string | null;
+  /** Manual per-order delivery fee in rupees (Aster). Added to the total and
+   *  stored in fields.deliveryFee; printed as its own receipt line. */
+  deliveryFee?: number;
   covers?: number | null;
   taxRate?: number;
   serviceChargeRate?: number;
@@ -414,10 +424,16 @@ export function createOrder(input: CreateOrderInput) {
     input.discountAmount ?? 0,
     input.appliedCharges ?? []
   );
+  // Manual delivery fee (rupees) — kept OUT of computeTotals so the service
+  // charge stays pure; added straight onto the order total below.
+  const deliveryFee = Math.max(0, Number(input.deliveryFee) || 0);
+  const orderTotal = totals.totalAmount + deliveryFee;
   const fields = {
     taxRate: input.taxRate ?? 0,
     serviceChargeRate: input.serviceChargeRate ?? 0,
     appliedCharges: input.appliedCharges ?? [],
+    deliveryAddress: input.deliveryAddress ?? null,
+    deliveryFee,
   };
 
   const tx = d.transaction(() => {
@@ -439,7 +455,7 @@ export function createOrder(input: CreateOrderInput) {
       tax: totals.taxAmount,
       sc: totals.serviceChargeAmount,
       discount: totals.discountAmount,
-      total: totals.totalAmount,
+      total: orderTotal,
       terminal: terminalId,
       fields: JSON.stringify(fields),
       ts,
