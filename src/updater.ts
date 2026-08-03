@@ -12,6 +12,7 @@ import { autoUpdater } from "electron-updater";
 import { Notification, dialog } from "electron";
 import { logger } from "./logger";
 import { setPendingUpdate } from "./tray";
+import { loadConfig } from "./config";
 
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // hourly check for a new download
 
@@ -49,6 +50,65 @@ function promptInstall(version: string): void {
     .catch(() => {});
 }
 
+/**
+ * Point the updater at Dine instead of GitHub, and authenticate the request.
+ *
+ * WHY: this agent used to auto-update straight from the public GitHub repo
+ * (`publish: provider: github` in electron-builder.yml, baked into
+ * app-update.yml at build time). That repo is going PRIVATE, and
+ * electron-updater sends no credentials of its own — so the baked-in feed
+ * starts returning 404 to every installed agent, permanently, and each till
+ * would need a manual reinstall to ever update again.
+ *
+ * `setFeedURL` overrides app-update.yml at runtime, so the build and publish
+ * pipeline is untouched (GitHub Releases stays the source Dine pulls from,
+ * latest.yml is still generated the same way). Only where the INSTALLED agent
+ * looks changes.
+ *
+ * Auth: electron-updater forwards `requestHeaders` on both the feed request
+ * and the download, so we present the printer key this agent already holds.
+ * That keeps the update channel as closed as the repo it came from, instead of
+ * trading a private repo for an anonymous public download URL.
+ *
+ * Read fresh on every check, never cached: a brand-new install has no key
+ * until it is paired with a branch, and it must start updating on its own once
+ * that happens rather than staying stranded until the next restart.
+ *
+ * Returns false when the agent is not paired yet — nothing to authenticate
+ * with, so there is no point issuing the check.
+ */
+function applyFeedConfig(): boolean {
+  let serverUrl: string;
+  let agentKey: string | undefined;
+  try {
+    const config = loadConfig();
+    serverUrl = (config.serverUrl || "").replace(/\/+$/, "");
+    // Any configured printer's key identifies this agent; they all belong to
+    // the same branch and the update is the same binary for all of them.
+    agentKey = config.printers.find((p) => p.agentKey)?.agentKey;
+  } catch (e) {
+    logger.warn(`[updater] cannot read config: ${(e as Error).message}`);
+    return false;
+  }
+
+  if (!serverUrl || !agentKey) {
+    logger.info("[updater] no server/printer key configured yet — skipping update check");
+    return false;
+  }
+
+  autoUpdater.setFeedURL({ provider: "generic", url: `${serverUrl}/api/print-agent/update` });
+  autoUpdater.requestHeaders = { Authorization: `Bearer ${agentKey}` };
+  return true;
+}
+
+/** Run a check, but only once the feed is actually configured. */
+function checkNow(reason: string): void {
+  if (!applyFeedConfig()) return;
+  autoUpdater.checkForUpdates().catch((e) => {
+    logger.warn(`[updater] ${reason} failed: ${(e as Error).message}`);
+  });
+}
+
 export function setupAutoUpdater(): void {
   autoUpdater.logger = logger;
   autoUpdater.autoDownload = true;
@@ -79,16 +139,12 @@ export function setupAutoUpdater(): void {
     logger.warn(`[updater] ${e.message}`);
   });
 
-  autoUpdater.checkForUpdates().catch((e) => {
-    logger.warn(`[updater] initial check failed: ${(e as Error).message}`);
-  });
+  checkNow("initial check");
 
   // Keep pulling new releases so they're downloaded and ready — but only offer,
   // never auto-install.
   setInterval(() => {
     if (pendingVersion) return; // already have one waiting on the user
-    autoUpdater.checkForUpdates().catch((e) => {
-      logger.warn(`[updater] check failed: ${(e as Error).message}`);
-    });
+    checkNow("check");
   }, CHECK_INTERVAL_MS);
 }
