@@ -2,6 +2,7 @@
 
 let cfg = { serverUrl: "", printers: [] };
 let systemPrinters = [];   // OS-detected print-queue names (USB etc.)
+let scanningPrinters = true;   // true while the first scan is still in flight
 
 const SELECT_CSS = "width:100%;padding:9px 11px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#1f2937;font-size:13px;";
 
@@ -101,8 +102,24 @@ function buildPrinterCard(printer, index) {
   sysHint.className = "status";
   setText(sysHint, systemPrinters.length
     ? "Detected " + systemPrinters.length + " printer(s) — choose the one your USB printer installed as."
-    : "Type the exact printer name from Windows Settings > Printers.");
-  sysWrap.append(sysLabel, sysInput, dataList, sysHint);
+    : (scanningPrinters
+        ? "Looking for printers on this PC…"
+        : "No printers detected — plug the printer in and press Rescan, or type its exact name from Windows Settings > Printers."));
+
+  // Detection can fail on old PCs (broken WMI, stripped Windows) even though
+  // the printer prints fine. Rescan on demand so the operator isn't stuck
+  // restarting the agent, and so a printer plugged in later shows up.
+  const sysRescan = document.createElement("button");
+  sysRescan.type = "button";
+  sysRescan.className = "ghost";
+  sysRescan.style.cssText = "margin-top:6px;";
+  setText(sysRescan, "Rescan printers");
+  sysRescan.addEventListener("click", function() {
+    setText(sysHint, "Looking for printers on this PC…");
+    refreshSystemPrinters(true);
+  });
+
+  sysWrap.append(sysLabel, sysInput, dataList, sysHint, sysRescan);
 
   const pidLabel = document.createElement("label");
   setText(pidLabel, "Printer ID");
@@ -410,12 +427,61 @@ function pollHealth() {
   window.agent.getStatus().then(renderHealth).catch(function() {});
 }
 
-window.agent.listPrinters().then(function(names) {
-  systemPrinters = Array.isArray(names) ? names : [];
+// ── System-printer detection ────────────────────────────────
+// The first scan can come back empty for reasons that have nothing to do with
+// the printer: PowerShell cold-starting on an old PC, the spooler restarting,
+// a printer plugged in after this window opened. So we never treat one empty
+// scan as final — we retry on a backoff and keep rescanning in the background.
+const PRINTER_RETRY_MS = [3000, 10000, 30000];
+const PRINTER_RESCAN_MS = 60000;
+
+function sameNames(a, b) {
+  return a.length === b.length && a.every(function(x, i) { return x === b[i]; });
+}
+
+function isEditing() {
+  const el = document.activeElement;
+  return !!el && (el.tagName === "INPUT" || el.tagName === "SELECT");
+}
+
+// force = the operator asked for this, so always repaint (they're on a button,
+// not in a field). Otherwise repaint only on a real change and only when the
+// user isn't mid-edit — a re-render would steal focus.
+function refreshSystemPrinters(force) {
+  return window.agent.listPrinters().then(function(names) {
+    const next = Array.isArray(names) ? names : [];
+    scanningPrinters = false;
+    const changed = !sameNames(next, systemPrinters);
+    systemPrinters = next;
+    if (force || (changed && !isEditing())) renderPrinters();
+    return next;
+  }).catch(function() {
+    scanningPrinters = false;
+    return systemPrinters;
+  });
+}
+
+function schedulePrinterRetries(attempt) {
+  if (attempt >= PRINTER_RETRY_MS.length) return;
+  setTimeout(function() {
+    if (systemPrinters.length) return;   // already recovered
+    refreshSystemPrinters(false).then(function(names) {
+      if (!names.length) schedulePrinterRetries(attempt + 1);
+    });
+  }, PRINTER_RETRY_MS[attempt]);
+}
+
+refreshSystemPrinters(false).then(function(names) {
   init();
-}).catch(function() {
-  init();
+  if (!names.length) schedulePrinterRetries(0);
 });
+
+// Keep the list live while the operator is actually looking at the Printers
+// tab — a printer plugged in mid-setup then appears without a restart.
+setInterval(function() {
+  if (activePane !== "print" || document.hidden) return;
+  refreshSystemPrinters(false);
+}, PRINTER_RESCAN_MS);
 
 window.agent.getVersion().then(function(v) {
   document.title = "Kliovo Print Agent v" + v;

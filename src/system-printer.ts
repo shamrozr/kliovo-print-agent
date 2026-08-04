@@ -19,6 +19,9 @@ import path from "path";
 import { logger } from "./logger";
 
 const SPOOL_TIMEOUT_MS = 15_000;
+// Enumeration gets a longer budget: on old hardware (Core 2 Duo + spinning
+// disk) a cold PowerShell start alone can eat 10-15s before it runs anything.
+const ENUM_TIMEOUT_MS = 30_000;
 
 /** C# RawPrinterHelper compiled in-process by PowerShell via Add-Type. */
 const RAW_PRINT_PS1 = `param([Parameter(Mandatory=$true)][string]$PrinterName,[Parameter(Mandatory=$true)][string]$FilePath)
@@ -145,30 +148,97 @@ export async function sendRawToSystemPrinter(printerName: string, bytes: Buffer)
   }
 }
 
+function lines(stdout: string): string[] {
+  return Array.from(
+    new Set(stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean))
+  );
+}
+
+/** Run a command for enumeration; never throws — returns "" when it fails. */
+function tryRun(cmd: string, args: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout: ENUM_TIMEOUT_MS, windowsHide: true }, (err, stdout, stderr) => {
+      if (err) {
+        const detail = (stderr || "").trim() || err.message;
+        logger.warn(`[system] printer enumeration via ${cmd} failed: ${detail}`);
+        return resolve("");
+      }
+      resolve(stdout || "");
+    });
+  });
+}
+
+/**
+ * Windows enumeration, cheapest-and-most-reliable first, all inside ONE
+ * PowerShell process so a slow PC pays the cold-start cost only once:
+ *
+ *   1. System.Drawing InstalledPrinters — wraps winspool EnumPrinters, the same
+ *      subsystem that actually prints. No WMI involved.
+ *   2. Get-Printer — PrintManagement/MI provider.
+ *   3. Get-WmiObject Win32_Printer — legacy WMI (what we used to rely on alone).
+ *
+ * Old Windows installs frequently have a corrupt WMI repository: the printer
+ * works and test-prints fine, but Win32_Printer throws. Anchoring on winspool
+ * keeps detection aligned with what we can actually print to.
+ */
+const ENUM_PS = [
+  "$ErrorActionPreference='SilentlyContinue'",
+  "$n=@()",
+  "try{Add-Type -AssemblyName System.Drawing;$n=@([System.Drawing.Printing.PrinterSettings]::InstalledPrinters)}catch{}",
+  "if($n.Count -eq 0){try{$n=@(Get-Printer | Select-Object -ExpandProperty Name)}catch{}}",
+  "if($n.Count -eq 0){try{$n=@(Get-WmiObject -Class Win32_Printer | Select-Object -ExpandProperty Name)}catch{}}",
+  "$n | ForEach-Object { $_ }",
+].join("; ");
+
+/** Last-ditch, PowerShell-free and WMI-free: the spooler's own registry keys. */
+const PRINTERS_KEY = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Print\\Printers";
+
+// Last successful scan. A rescan that fails (spooler restarting, WMI hiccup,
+// PowerShell starved on a slow PC) must not blank a picker that was working.
+let lastKnownPrinters: string[] = [];
+
 /** Enumerate OS-installed printer queue names so the UI can offer a picker. */
 export async function listSystemPrinters(): Promise<string[]> {
-  return new Promise((resolve) => {
-    const onDone = (stdout: string) => {
-      const names = stdout
-        .split(/\r?\n/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-      resolve(Array.from(new Set(names)));
-    };
+  const found = await scanSystemPrinters();
+  if (found.length) {
+    lastKnownPrinters = found;
+    return found;
+  }
+  if (lastKnownPrinters.length) {
+    logger.warn("[system] printer scan came back empty — keeping the last known list");
+    return lastKnownPrinters;
+  }
+  return [];
+}
 
-    if (process.platform === "win32") {
-      execFile(
-        "powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-Command",
-          "Get-WmiObject -Class Win32_Printer | Select-Object -ExpandProperty Name"],
-        { timeout: SPOOL_TIMEOUT_MS, windowsHide: true },
-        (err, stdout) => (err ? resolve([]) : onDone(stdout))
-      );
-    } else {
-      // `lpstat -e` prints one queue name per line.
-      execFile("lpstat", ["-e"], { timeout: SPOOL_TIMEOUT_MS }, (err, stdout) =>
-        err ? resolve([]) : onDone(stdout)
-      );
-    }
-  });
+async function scanSystemPrinters(): Promise<string[]> {
+  if (process.platform !== "win32") {
+    // `lpstat -e` prints one queue name per line.
+    return lines(await tryRun("lpstat", ["-e"]));
+  }
+
+  const ps = await tryRun("powershell.exe", [
+    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+    "-Command", ENUM_PS,
+  ]);
+  const names = lines(ps);
+  if (names.length) return names;
+
+  // PowerShell itself is missing/broken (stripped Windows builds do this) or
+  // every provider failed. Read the spooler's registry keys directly — local
+  // queues, which is exactly what a USB printer installs as.
+  logger.warn("[system] no printers via PowerShell — falling back to the registry");
+  const reg = await tryRun("reg.exe", ["query", PRINTERS_KEY]);
+  const fromReg = lines(reg)
+    .filter((l) => l.toUpperCase().startsWith("HKEY_"))
+    .map((l) => l.slice(l.lastIndexOf("\\") + 1))
+    .filter(Boolean);
+
+  if (!fromReg.length) {
+    logger.error(
+      "[system] printer enumeration found nothing — the printer can still be " +
+      "used by typing its exact Windows name in Settings > System Printer."
+    );
+  }
+  return fromReg;
 }
