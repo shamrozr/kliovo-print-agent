@@ -16,12 +16,32 @@ const POLL_INTERVAL_MS = 4_000;
 const IDLE_INTERVAL_MS = 15_000;
 const RELAY_TIMEOUT_MS = 30_000;
 
-// Dedup ledger — task ids we've already relayed this run. Belt-and-braces on top
-// of the server's unique(authority,invoiceId) + already-submitted guards.
+// Dedup ledger — keyed by task id AND attempt number. Belt-and-braces on top of
+// the server's unique(authority,invoiceId) + already-submitted guards.
+//
+// It must NOT be keyed on taskId alone. The task row is upserted per invoice, so
+// its id survives a re-queue: an operator pressing Retry hands us the same id,
+// we skipped it as "already relayed", never acked, and the server re-offered it
+// every lease expiry — for ever. The attempt number is what distinguishes a
+// genuine redelivery of a call we already made from a fresh go at the same one.
 const handled = new Set<string>();
+const HANDLED_MAX = 500;
+
+function rememberHandled(key: string): void {
+  handled.add(key);
+  // Set iterates in insertion order, so this evicts oldest-first. Unbounded, a
+  // long-running till would grow this set for the life of the process.
+  while (handled.size > HANDLED_MAX) {
+    const oldest = handled.values().next().value as string | undefined;
+    if (oldest === undefined) break;
+    handled.delete(oldest);
+  }
+}
 
 interface RelayTask {
   taskId: string;
+  /** Server-side lease counter. Absent on servers older than this field. */
+  attempts?: number;
   authority: string;
   url: string;
   method: string;
@@ -42,11 +62,15 @@ async function pollOnce(serverUrl: string, key: string): Promise<boolean> {
   }
 
   const task = (await res.json()) as RelayTask;
-  if (handled.has(task.taskId)) {
-    logger.info(`[tax-relay] ${task.taskId} already relayed — skipping`);
-    return true;
+  const dedupKey = `${task.taskId}:${task.attempts ?? 0}`;
+  if (handled.has(dedupKey)) {
+    logger.info(`[tax-relay] ${dedupKey} already relayed — skipping`);
+    // Report idle, not busy. A skip is not work: treating it as work drops the
+    // loop to the 4s poll interval and hammers the server for as long as the
+    // task keeps being re-offered.
+    return false;
   }
-  handled.add(task.taskId);
+  rememberHandled(dedupKey);
   logger.info(`[tax-relay] ${task.taskId} → ${task.authority} ${task.method} ${task.url}`);
 
   let httpStatus = 0;
@@ -76,11 +100,11 @@ async function pollOnce(serverUrl: string, key: string): Promise<boolean> {
     });
     if (!ack.ok) {
       // Server didn't record it — drop from dedup so the lease reclaim re-offers it.
-      handled.delete(task.taskId);
+      handled.delete(dedupKey);
       logger.warn(`[tax-relay] ack ${task.taskId} HTTP ${ack.status}`);
     }
   } catch (e) {
-    handled.delete(task.taskId);
+    handled.delete(dedupKey);
     logger.warn(`[tax-relay] ack ${task.taskId} failed: ${(e as Error).message}`);
   }
   return true;
