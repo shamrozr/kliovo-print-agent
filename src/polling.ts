@@ -15,6 +15,42 @@ const POLL_INTERVAL_MS    = 2_000;
 const BACKOFF_INTERVAL_MS = 10_000;
 
 /**
+ * Push-to-poll (v2.10.0). The server holds an idle poll open for up to this
+ * many seconds and releases it the INSTANT a job becomes claimable (Redis wake
+ * on its side), so the poll is the delivery channel — near-zero standing cost,
+ * faster delivery than the old 2s hammer. Advertised via `X-Agent-Wait`; a
+ * server that predates the header just answers immediately like before.
+ *
+ * POLL_FETCH_TIMEOUT_MS must stay comfortably ABOVE the advertised wait —
+ * aborting a poll the server is still holding is how tickets get stranded at
+ * 'printing' (reclaim is off server-side). 25s hold + 10s margin.
+ *
+ * ACK/NACK keep their own short 8s timeout — those are never held.
+ */
+const EXTENDED_WAIT_SECONDS = 25;
+const POLL_FETCH_TIMEOUT_MS = (EXTENDED_WAIT_SECONDS + 10) * 1_000;
+
+/**
+ * Server-driven pacing: `X-Next-Poll-Ms` on every /api/print/pending response
+ * says when this printer should poll next (short after a job to drain bursts,
+ * short after a held 204 to re-arm the long-poll, long while paused). Absent
+ * header (old server) → POLL_INTERVAL_MS, the pre-2.10 cadence. Clamped so a
+ * bad header can neither hot-loop us nor silence a printer.
+ */
+const serverPollHint = new Map<string, number>();
+
+function readPollHint(printerId: string, res: Response): void {
+  const raw = res.headers.get("x-next-poll-ms");
+  if (raw === null) {
+    serverPollHint.delete(printerId);
+    return;
+  }
+  const ms = Number(raw);
+  if (!Number.isFinite(ms)) return;
+  serverPollHint.set(printerId, Math.min(Math.max(ms, 250), 60_000));
+}
+
+/**
  * When we last put bytes on a printer. The updater reads this so it never
  * restarts the agent in the middle of service.
  */
@@ -136,10 +172,14 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
       // shows the agent as connected even when the browser can't reach the local
       // bridge (e.g. the web runs on a different device than the agent).
       "X-Agent-Version": app.getVersion(),
+      // Opt into the server-side long-poll hold (see EXTENDED_WAIT_SECONDS).
+      "X-Agent-Wait": String(EXTENDED_WAIT_SECONDS),
       ...dedupHeader(),
     },
-    signal:  AbortSignal.timeout(8_000),
+    signal:  AbortSignal.timeout(POLL_FETCH_TIMEOUT_MS),
   });
+
+  readPollHint(printer.printerId, res);
 
   if (res.status === 204) return; // Idle — no queued jobs
   if (!res.ok) {
@@ -234,10 +274,17 @@ export function startPolling(): NodeJS.Timeout {
 
       // Cheap per-printer backoff: a chronically failing printer polls at
       // BACKOFF_INTERVAL_MS instead of every tick, without needing its own
-      // timer. Every other printer is unaffected either way.
+      // timer. Every other printer is unaffected either way. When healthy,
+      // the server's X-Next-Poll-Ms hint paces us (long-poll re-arm ≈250ms,
+      // post-job drain ≈500ms, paused ≈5s); without a hint, the pre-2.10
+      // 2s cadence. Note `last` is the poll's START time — a held long-poll
+      // has already outlived any small hint by the time it returns, so the
+      // next tick re-arms immediately, which is the point.
       const errCount = consecutiveErrors.get(p.printerId) ?? 0;
       const last     = lastAttemptAt.get(p.printerId) ?? 0;
-      const interval = errCount > 5 ? BACKOFF_INTERVAL_MS : POLL_INTERVAL_MS;
+      const interval = errCount > 5
+        ? BACKOFF_INTERVAL_MS
+        : (serverPollHint.get(p.printerId) ?? POLL_INTERVAL_MS);
       if (now - last < interval) continue;
 
       inFlight.add(p.printerId);
