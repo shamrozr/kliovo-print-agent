@@ -6,6 +6,12 @@
 import type { KotInput } from "../render/templates/kot";
 import type { ReceiptInput } from "../render/templates/receipt";
 import type { LayoutConfig } from "../render/designer-types";
+import {
+  isKotSuppressed,
+  ownAddonsOnStation,
+  printsItemAtStation,
+  ridingModifiers,
+} from "../store/kot-plan";
 
 export type RasterLogo = { bytes: Buffer; widthBytes: number; heightDots: number };
 
@@ -38,6 +44,9 @@ export interface ItemRow {
   notes?: string | null;
   course?: string | null;
   station_id?: string | null;
+  /** Frozen Ticket Router plan (JSON) — see store/kot-routing.ts. */
+  station_ids?: string | null;
+  kot_routing?: string | null;
 }
 
 export interface StationRow {
@@ -87,29 +96,58 @@ export function receiptJobId(orderId: string, paymentId: string): string {
   return `OFF:${orderId}:receipt:${paymentId}`;
 }
 
+/**
+ * Build ONE station's ticket out of the round's lines.
+ *
+ * `stationId` — not just the station row — is what the per-line filtering keys
+ * off, because a station present in routing may have no mirrored `kitchen_stations`
+ * row yet, and `null` is a real value: the catch-all slip for unrouted lines (the
+ * offline equivalent of the cloud's `kitchen_ticket:none`).
+ *
+ * Filtering happens HERE rather than at the caller so the two things that must
+ * agree — which stations get a ticket, and what goes on one — read the same
+ * frozen plan. Diverge and a station gets a slip with nothing on it, which a line
+ * cook reads as a lost order.
+ */
 export function buildKotInput(
   order: OrderRow,
   items: ItemRow[],
   station: StationRow | null,
   tableName: string | undefined,
   fireTime: string,
-  fireDate?: string
+  fireDate?: string,
+  stationId: string | null = station?.id ?? null
 ): KotInput {
+  const live = items.filter((it) => !isKotSuppressed(it));
+  const itemLines = live
+    .filter((it) => printsItemAtStation(it, stationId))
+    .map((it) => ({
+      name: it.name || "Item",
+      quantity: Number(it.quantity) || 1,
+      modifiers: ridingModifiers(it, parseMods(it.modifiers)),
+      notes: it.notes ?? undefined,
+      course: it.course ?? undefined,
+    }));
+  // Own-line add-ons routed to THIS station, including ones whose base item
+  // prints somewhere else entirely.
+  const addonLines = live.flatMap((it) =>
+    ownAddonsOnStation(it, stationId).map((name) => ({
+      name,
+      quantity: Number(it.quantity) || 1,
+      modifiers: [] as { name: string }[],
+      notes: `for ${it.name || "item"}`,
+      course: it.course ?? undefined,
+    }))
+  );
   return {
     referenceNumber: order.reference || order.id,
-    stationName: station?.name || station?.label || "KITCHEN",
+    stationName: station?.name || station?.label || (stationId === null ? "UNROUTED" : "KITCHEN"),
     tableName,
     guestName: order.guest_name ?? undefined,
     orderType: orderType(order),
     fireTime,
     fireDate,
-    items: items.map((it) => ({
-      name: it.name || "Item",
-      quantity: Number(it.quantity) || 1,
-      modifiers: parseMods(it.modifiers),
-      notes: it.notes ?? undefined,
-      course: it.course ?? undefined,
-    })),
+    items: [...itemLines, ...addonLines],
   };
 }
 

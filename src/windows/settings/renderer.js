@@ -341,6 +341,7 @@ function init() {
     document.getElementById("serverUrl").value = c.serverUrl || "";
     document.getElementById("offlineDeviceKey").value = c.offlineDeviceKey || "";
     document.getElementById("taxRelayKey").value = c.taxRelayKey || "";
+    renderLanAccess();
     renderPrinters();
   });
 }
@@ -534,6 +535,29 @@ function pill(text, kind) {
   p.textContent = text;
   return p;
 }
+
+// ── LAN access — call-centre desks / second tills ──────────────
+// Off by default and opt-in per branch: this machine owns the encrypted store,
+// so opening its listener is a decision an operator makes once. Everything the
+// desks reach is held to private addresses, the POS routes, and a session token
+// (see bridge-server.ts) — the pairing secret and the device routes never leave
+// this computer. Needs an app restart because the listener binds at startup.
+function renderLanAccess() {
+  var box = document.getElementById("lanAccess");
+  var hint = document.getElementById("lanAccessHint");
+  if (!box) return;
+  box.checked = cfg.lanAccess === true;
+  setText(
+    hint,
+    box.checked
+      ? "On. Desks sign in with staff credentials and their orders land in this computer's store — one outbox, so bringing the branch back online syncs them all together. Restart this app after changing."
+      : "Off. Only this computer can take orders. Turn on if a call-centre desk or second till shares this network."
+  );
+}
+document.getElementById("lanAccess").addEventListener("change", function() {
+  cfg.lanAccess = document.getElementById("lanAccess").checked;
+  window.agent.saveConfig(cfg).then(renderLanAccess).catch(function() {});
+});
 
 // ── Device Key — save + verify ─────────────────────────────────
 document.getElementById("saveKeyBtn").addEventListener("click", function() {
@@ -1234,6 +1258,24 @@ function renderRoutingBody(snap) {
     if (pid) applyRoute({ stationId: null, printerId: pid, role: "receipt" }); else removeRoute({ stationId: null, role: "receipt" });
   });
   body.appendChild(routingRow("Customer receipt printer", "Override where receipts print offline.", rcSel));
+  // What the Ticket Router says. Without it "the kitchen got no ticket" is
+  // indistinguishable between routed-elsewhere, routed-nowhere and never-print,
+  // and only the first is fixed by an override on this screen.
+  var cov = snap.routerCoverage;
+  var covLine = document.createElement("div");
+  covLine.className = "status";
+  covLine.style.cssText = "margin-top:14px;color:#64748b";
+  if (!cov || !cov.warm) {
+    setText(covLine, "Ticket Router not synced yet — every line uses the station sent by the till.");
+  } else {
+    var bits = [cov.items + " menu items routed"];
+    if (cov.unrouted) bits.push(cov.unrouted + " with no station (print on the fallback above)");
+    if (cov.suppressed) bits.push(cov.suppressed + " never printed by configuration");
+    if (cov.modifiersWithOwnLine) bits.push(cov.modifiersWithOwnLine + " add-ons cut their own line");
+    setText(covLine, bits.join(" · "));
+  }
+  body.appendChild(covLine);
+
   // Stations.
   var hdr = document.createElement("div");
   hdr.style.cssText = "font-weight:700;font-size:11px;color:#64748b;margin:16px 0 2px;text-transform:uppercase;letter-spacing:.04em";
@@ -1251,6 +1293,14 @@ function renderRoutingBody(snap) {
         if (pid) applyRoute({ stationId: st.id, printerId: pid, role: "kot" }); else removeRoute({ stationId: st.id, role: "kot" });
       });
       var sub = localP ? "Overridden locally." : (mirroredP ? "Using web route." : "No web route — uses the fallback above.");
+      // How many menu items actually reach this station. A station wired to a
+      // printer but reached by nothing is silent for a reason no printer test
+      // will ever reveal.
+      var covPer = (snap.routerCoverage && snap.routerCoverage.warm) ? (snap.routerCoverage.perStation || {}) : null;
+      if (covPer) {
+        var n = covPer[st.id] || 0;
+        sub += n ? (" " + n + " item" + (n === 1 ? "" : "s") + " route here.") : " No items route here.";
+      }
       body.appendChild(routingRow(st.label || st.name || st.id, sub, sel));
     })(snap.stations[i]);
   }

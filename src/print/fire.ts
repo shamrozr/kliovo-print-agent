@@ -13,6 +13,7 @@ import { buildKotInput, buildReceiptInput, kotJobId, receiptJobId } from "./rend
 import type { ItemRow as pr_ItemRow } from "./render-map";
 import { loadReceiptLogo } from "./logo";
 import * as pr from "../store/print-repo";
+import { isKotSuppressed, stationsOnLine } from "../store/kot-plan";
 
 /** Shared receipt options: mirrored designer template + locally-loaded logo. */
 function receiptExtras(paperWidth: 80 | 58) {
@@ -74,30 +75,73 @@ async function fireKotsForItems(orderId: string, items: pr_ItemRow[]): Promise<v
   const tableName = pr.getTableName(order.table_id ?? undefined);
   const { time, date } = fmtTime(order.created_at || Date.now());
 
+  // A line fans out to EVERY station on its frozen plan — its own stations plus
+  // the stations of any add-on that cuts its own line. Grouping by the single
+  // station_id (what this did before the Ticket Router) printed a two-station
+  // item once, at whichever station happened to be first.
+  //
+  // Suppressed lines are dropped here AND filtered again inside buildKotInput:
+  // the two answer different questions (how many tickets to cut vs. what goes on
+  // one), and a line that slipped past only one would print on a ticket cut for
+  // something else.
   const byStation = new Map<string | null, pr_ItemRow[]>();
-  for (const it of items) {
-    const key = it.station_id ?? null;
+  const stationsPerItem = new Map<string, string[]>();
+  const push = (key: string | null, it: pr_ItemRow) => {
     const arr = byStation.get(key);
     if (arr) arr.push(it);
     else byStation.set(key, [it]);
+  };
+  const suppressed: pr_ItemRow[] = [];
+  for (const it of items) {
+    if (isKotSuppressed(it)) {
+      suppressed.push(it);
+      continue;
+    }
+    const stations = stationsOnLine(it);
+    stationsPerItem.set(it.id, stations);
+    // No station anywhere → the catch-all slip, which the operator's local
+    // wildcard route sends to the kitchen rather than the cashier.
+    if (stations.length === 0) push(null, it);
+    else for (const st of stations) push(st, it);
   }
+
+  // Nothing to print is a valid outcome (a whole round of suppressed lines), and
+  // those lines must still be marked fired or every later add-item retries them.
+  if (suppressed.length > 0) {
+    logger.info(`[fire] order ${orderId}: ${suppressed.length} line(s) suppressed — no kitchen ticket by configuration`);
+    pr.markItemsFired(suppressed.map((i) => i.id));
+  }
+  if (byStation.size === 0) return;
+
+  // Per-line delivery outcome. A line at two stations is only fired once BOTH
+  // tickets hit paper — a partial fire must stay retryable so a transiently dead
+  // station printer never silently drops half the order.
+  const failedItems = new Set<string>();
 
   let seq = Date.now();
   for (const [stationId, stationItems] of byStation) {
     const targets = resolveKotTargets(printers, routes, ft, stationId);
     // Routing trace — makes "why did this KOT go to the cashier?" answerable from
-    // the log alone: shows the item's station, how many routes were available,
-    // the chosen printer, and whether it was a real match or the default fallback.
+    // the log alone: shows the station, how many routes were available, the chosen
+    // printer, and whether it was a real match or the default fallback.
     logger.info(
-      `[fire] KOT route: order=${orderId} station=${stationId ?? "∅(null)"} items=${stationItems.length} ` +
+      `[fire] KOT route: order=${orderId} station=${stationId ?? "∅(unrouted)"} items=${stationItems.length} ` +
         `routes=${routes.length} → ${targets.map((t) => `${t.printer.name}${t.fallback ? "(FALLBACK)" : ""}`).join(", ") || "NONE"}`
     );
     if (targets.length === 0) {
       logger.error(`[fire] order ${orderId} station ${stationId}: NO active printers — cannot print KOT`);
+      stationItems.forEach((i) => failedItems.add(i.id));
       continue;
     }
-    const station = pr.getStation(stationId);
-    const input = buildKotInput(order, stationItems, station, tableName, time, date);
+    const station = stationId ? pr.getStation(stationId) : null;
+    const input = buildKotInput(order, stationItems, station, tableName, time, date, stationId);
+    // A station can end up with nothing to show when every line reaching it does
+    // so only through an add-on that another station owns. Cutting blank paper
+    // reads as a lost ticket, so skip it.
+    if (input.items.length === 0) {
+      logger.info(`[fire] order ${orderId} station ${stationId ?? "∅"}: no printable lines — skipping ticket`);
+      continue;
+    }
     const bytes = renderJob({ kind: "kot", input }, renderContextFromPrinter(targets[0].printer));
     const jobId = kotJobId(orderId, stationId, seq++);
     let anyDelivered = false;
@@ -105,14 +149,14 @@ async function fireKotsForItems(orderId: string, items: pr_ItemRow[]): Promise<v
       const ok = await deliverOnce(`${jobId}:${target.printer.printerId}`, target, bytes, `KOT ${orderId}/${stationId}`);
       anyDelivered = anyDelivered || ok;
     }
-    // Only mark fired if the kitchen actually got the ticket. A failed fire
-    // leaves fired_at NULL so the next add-item / reconnect tick retries it.
-    if (anyDelivered) {
-      pr.markItemsFired(stationItems.map((i) => i.id));
-    } else {
+    if (!anyDelivered) {
       logger.error(`[fire] order ${orderId} station ${stationId}: KOT delivery failed on all targets — items left unfired for retry`);
+      stationItems.forEach((i) => failedItems.add(i.id));
     }
   }
+
+  const fired = items.filter((i) => stationsPerItem.has(i.id) && !failedItems.has(i.id)).map((i) => i.id);
+  if (fired.length > 0) pr.markItemsFired(fired);
 }
 
 export async function fireOnCreate(orderId: string): Promise<void> {
@@ -207,13 +251,19 @@ export async function reprintReceipt(orderId: string): Promise<{ ok: boolean; er
 export async function reprintKot(orderId: string, stationId: string | null): Promise<{ ok: boolean; error?: string }> {
   const order = pr.getOrderRow(orderId);
   if (!order) return { ok: false, error: "order not found" };
-  const items = pr.getOrderItems(orderId).filter((i) => (i.station_id ?? null) === stationId);
+  // Filter by the frozen plan, not the single station_id mirror — otherwise a
+  // reprint for a station the line reaches only via an add-on comes back empty.
+  const items = pr
+    .getOrderItems(orderId)
+    .filter((i) => !isKotSuppressed(i))
+    .filter((i) => (stationId === null ? stationsOnLine(i).length === 0 : stationsOnLine(i).includes(stationId)));
   if (items.length === 0) return { ok: false, error: "no items for station" };
   const targets = resolveKotTargets(pr.getResolvablePrinters(), pr.getEffectiveRoutes(), order.source || "dine_in", stationId);
   if (targets.length === 0) return { ok: false, error: "no active printer" };
-  const station = pr.getStation(stationId);
+  const station = stationId ? pr.getStation(stationId) : null;
   const { time, date } = fmtTime(order.created_at || Date.now());
-  const input = buildKotInput(order, items, station, pr.getTableName(order.table_id ?? undefined), time, date);
+  const input = buildKotInput(order, items, station, pr.getTableName(order.table_id ?? undefined), time, date, stationId);
+  if (input.items.length === 0) return { ok: false, error: "no printable lines for station" };
   input.version = 2;
   const bytes = renderJob({ kind: "kot", input }, renderContextFromPrinter(targets[0].printer));
   try {

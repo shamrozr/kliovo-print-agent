@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { getStore } from "./db";
 import { getState, setState, getOwnTerminalId } from "./repo";
 import { normalizeOrderNumbering, formatOfflineRef, type OrderNumberingConfig } from "./offline-ref";
+import { resolveLineRouting } from "./kot-routing";
 import {
   computeTotals,
   recomputePaymentTotals,
@@ -265,24 +266,31 @@ function resolveLineBrandId(
 }
 
 /**
- * Derive a line's kitchen station from its menu item when the client didn't
- * supply one. WHY THIS MATTERS: KOT routing is station-specific (Dine derives one
- * route per station). An order item stored with a NULL station matches no route
- * and drops to the default printer — the cashier — so kitchen tickets never reach
- * the kitchen/bar (network) printers. Older Aster builds don't send stationId, so
- * the agent (source of truth on write) fills it here from the mirrored menu item.
- * Combos carry no single menu_item_id → null (their picks span multiple stations;
- * per-pick KOT splitting is a separate feature).
+ * Resolve a line's KOT routing plan — which station(s) it fires at, whether an
+ * add-on cuts its own line, and whether it is barred from paper entirely.
+ *
+ * WHY THE AGENT DOES THIS, NOT THE CLIENT: routing decides where the kitchen
+ * ticket physically lands. A line stamped with the wrong station (or none) matches
+ * no route and drops to the default printer — the cashier — so the kitchen never
+ * sees it. The agent is the source of truth on write, so the plan is resolved and
+ * FROZEN here, exactly as the cloud freezes it onto OrderItem at creation: an
+ * older Aster build that sends no stationId still routes correctly, and re-routing
+ * the menu tomorrow cannot rewrite where a ticket that already printed went.
+ *
+ * The client's `stationId` survives only as a fallback hint for a line the Ticket
+ * Router says nothing about. Combos carry no single menu_item_id, so they resolve
+ * to the hint alone (their picks span stations — per-pick splitting is separate).
  */
-function resolveLineStationId(
-  d: ReturnType<typeof getStore>,
-  item: { menuItemId?: string | null }
-): string | null {
-  if (item.menuItemId) {
-    const r = d.prepare("SELECT station_id FROM menu_items WHERE id = ?").get(item.menuItemId) as { station_id?: string | null } | undefined;
-    return r?.station_id ?? null;
-  }
-  return null;
+function resolveLineKot(item: {
+  menuItemId?: string | null;
+  stationId?: string | null;
+  modifiers?: Array<{ id?: string | null; modifierId?: string | null; name?: string | null }>;
+}) {
+  return resolveLineRouting({
+    menuItemId: item.menuItemId ?? null,
+    modifiers: item.modifiers ?? [],
+    fallbackStationId: item.stationId ?? null,
+  });
 }
 
 // ── Payment + order config (synced from the tenant) ──────────
@@ -372,6 +380,11 @@ export interface CreateOrderInput {
   /** Manual per-order delivery fee in rupees (Aster). Added to the total and
    *  stored in fields.deliveryFee; printed as its own receipt line. */
   deliveryFee?: number;
+  /** Which desk rang it — "call_center" for a call-centre terminal on the branch
+   *  LAN, absent for the till. Recorded in fields.channel and carried in the
+   *  change_log payload; `source` stays a normal order source so nothing
+   *  downstream needs a new enum. */
+  channel?: string | null;
   covers?: number | null;
   taxRate?: number;
   serviceChargeRate?: number;
@@ -435,6 +448,7 @@ export function createOrder(input: CreateOrderInput) {
     appliedCharges: input.appliedCharges ?? [],
     deliveryAddress: input.deliveryAddress ?? null,
     deliveryFee,
+    channel: input.channel ?? null,
   };
 
   const tx = d.transaction(() => {
@@ -463,14 +477,15 @@ export function createOrder(input: CreateOrderInput) {
     });
     const insItem = d.prepare(
       `INSERT INTO order_items (id, order_id, menu_item_id, variant_id, name, quantity, unit_price,
-        total_price, modifiers, notes, course, station_id, kitchen_status, sort_order, created_at,
-        combo_id, combo_name, combo_price, combo_picks, brand_id)
-       VALUES (@id,@orderId,@menuItemId,@variantId,@name,@qty,@unit,@total,@mods,@notes,@course,@station,'pending',@sort,@ts,
+        total_price, modifiers, notes, course, station_id, station_ids, kot_routing, kitchen_status,
+        sort_order, created_at, combo_id, combo_name, combo_price, combo_picks, brand_id)
+       VALUES (@id,@orderId,@menuItemId,@variantId,@name,@qty,@unit,@total,@mods,@notes,@course,@station,@stationIds,@kotRouting,'pending',@sort,@ts,
         @comboId,@comboName,@comboPrice,@comboPicks,@brandId)`
     );
     input.items.forEach((it, i) => {
       const mods = it.modifiers ?? [];
       const modTotal = mods.reduce((s: number, m: any) => s + (m.priceAdjustment ?? 0), 0);
+      const kot = resolveLineKot({ menuItemId: it.menuItemId, stationId: it.stationId, modifiers: mods });
       insItem.run({
         id: id("oi"),
         orderId,
@@ -483,7 +498,9 @@ export function createOrder(input: CreateOrderInput) {
         mods: JSON.stringify(mods),
         notes: it.notes ?? null,
         course: it.course ?? null,
-        station: it.stationId ?? resolveLineStationId(d, it),
+        station: kot.primaryStationId,
+        stationIds: JSON.stringify(kot.stationIds),
+        kotRouting: kot.routing ? JSON.stringify(kot.routing) : null,
         sort: i,
         ts,
         comboId: it.comboId ?? null,
@@ -553,12 +570,14 @@ export function addItem(
   const mods = item.modifiers ?? [];
   const modTotal = mods.reduce((s: number, m: any) => s + (m.priceAdjustment ?? 0), 0);
   const count = (d.prepare("SELECT count(*) c FROM order_items WHERE order_id=?").get(orderId) as any).c;
+  const kot = resolveLineKot({ menuItemId: item.menuItemId, stationId: item.stationId, modifiers: mods });
   const tx = d.transaction(() => {
     d.prepare(
-      `INSERT INTO order_items (id, order_id, menu_item_id, name, quantity, unit_price, total_price, modifiers, notes, station_id, kitchen_status, sort_order, created_at, combo_id, combo_name, combo_price, combo_picks, brand_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?)`
+      `INSERT INTO order_items (id, order_id, menu_item_id, name, quantity, unit_price, total_price, modifiers, notes, station_id, station_ids, kot_routing, kitchen_status, sort_order, created_at, combo_id, combo_name, combo_price, combo_picks, brand_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?)`
     ).run(itemId, orderId, item.menuItemId ?? null, item.name, item.quantity, item.unitPrice,
-      (item.unitPrice + modTotal) * item.quantity, JSON.stringify(mods), item.notes ?? null, item.stationId ?? resolveLineStationId(d, item), count, now(),
+      (item.unitPrice + modTotal) * item.quantity, JSON.stringify(mods), item.notes ?? null,
+      kot.primaryStationId, JSON.stringify(kot.stationIds), kot.routing ? JSON.stringify(kot.routing) : null, count, now(),
       item.comboId ?? null, item.comboName ?? null, item.comboPrice ?? null, item.picks ? JSON.stringify(item.picks) : null,
       item.brandId ?? resolveLineBrandId(d, item));
     recalc(orderId);

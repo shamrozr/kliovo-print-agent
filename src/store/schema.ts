@@ -320,6 +320,30 @@ CREATE TABLE IF NOT EXISTS print_routing (
   role             TEXT DEFAULT 'kot',
   updated_at       INTEGER
 );
+-- Ticket Router, resolved by the CLOUD and mirrored down. The server runs its own
+-- resolveKotRoutingBatch and ships the ANSWER (which stations, and whether the line
+-- is barred from paper) — the agent never re-implements the precedence rules
+-- (item "block" beats category, item "allow" beats a category "never"). Two
+-- implementations of one number is exactly the drift the Ticket Router was written
+-- to fix in the cloud; a vendored copy here would become the second one.
+--
+-- Shipped as its OWN TABLE, never as a column on menu_items: mirrorUpsert skips an
+-- unknown TABLE silently but a row with an unknown COLUMN throws and drops the whole
+-- batch — a new menu_items column would wipe the menu on every agent still on 2.10.
+CREATE TABLE IF NOT EXISTS menu_item_routing (
+  menu_item_id TEXT PRIMARY KEY,
+  stations     TEXT DEFAULT '[]',   -- JSON string[] of stationIds, resolved
+  suppressed   INTEGER DEFAULT 0,   -- 1 = never print a kitchen ticket for this item
+  updated_at   INTEGER
+);
+-- modifierId → stations it fires at as its OWN line. Mirrored verbatim because it
+-- is a flat map with no precedence — looking it up is not a second implementation.
+-- A modifier absent from here rides under its parent item on the parent's ticket.
+CREATE TABLE IF NOT EXISTS modifier_routing (
+  modifier_id  TEXT PRIMARY KEY,
+  stations     TEXT DEFAULT '[]',   -- JSON string[]
+  updated_at   INTEGER
+);
 CREATE TABLE IF NOT EXISTS kitchen_stations (
   id         TEXT PRIMARY KEY,
   name       TEXT,

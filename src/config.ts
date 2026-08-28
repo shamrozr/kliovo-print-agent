@@ -72,6 +72,19 @@ export interface AgentConfig {
    */
   attendanceDeviceKey?: string;
 
+  /**
+   * Let POS clients on the branch LAN reach this agent — call-centre desks and
+   * second tills that sit on the same network and share the branch's printers.
+   *
+   * OFF by default, and deliberately opt-in per branch: the agent owns the
+   * encrypted store, so widening its listener is a decision an operator makes
+   * once, not a default every install inherits. When on, the bridge binds
+   * 0.0.0.0 and non-loopback callers are held to private address ranges, an
+   * allow-list of POS routes, and a valid /local/auth session token — the
+   * pairing secret and the device routes never leave the machine.
+   */
+  lanAccess?: boolean;
+
   /** Push continued-order op-deltas to the server merge endpoint. OFF until the
    *  server route is deployed (emitting ops a server can't merge would 4xx). */
   pushContinuedOps?: boolean;

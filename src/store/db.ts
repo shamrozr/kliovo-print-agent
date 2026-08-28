@@ -47,6 +47,20 @@ function runMigrations(conn: Database.Database): void {
     }
   }
 
+  // Ticket Router: the per-line frozen routing plan. `station_ids` is the union of
+  // the item's stations and its own-line add-ons' stations (what the fire path
+  // groups by); `kot_routing` is the full plan (item stations, add-ons, suppressed)
+  // and is what render filters against. Frozen at write, same rule as the cloud's
+  // OrderItem.kotRouting: re-routing the menu tomorrow must not rewrite where a
+  // ticket that already printed went.
+  for (const col of ["station_ids TEXT", "kot_routing TEXT"]) {
+    try {
+      conn.prepare(`ALTER TABLE order_items ADD COLUMN ${col}`).run();
+    } catch (e) {
+      if (!/duplicate column/i.test((e as Error).message)) throw e;
+    }
+  }
+
   // Brands: the `brands` table itself is created by applySchema (CREATE TABLE IF
   // NOT EXISTS), but brand_id columns on pre-existing tables need an explicit
   // ALTER on already-warmed DBs. Mirror ingestion would otherwise drop the

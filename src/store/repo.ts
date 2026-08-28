@@ -96,6 +96,8 @@ const MIRROR_TABLES: Record<string, string> = {
   printers: "id",
   print_routing: "id",
   kitchen_stations: "id",
+  menu_item_routing: "menu_item_id",
+  modifier_routing: "modifier_id",
   print_templates: "kind",
   branding: "id",
 };

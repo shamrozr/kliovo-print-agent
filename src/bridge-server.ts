@@ -42,6 +42,8 @@ import { fireOnCreate, fireOnAddItem, fireReceipt, fireReceiptOnCreate } from ".
 
 export const BRIDGE_PORT = 6310;
 
+import { isLanRouteAllowed, isLoopbackAddr, isPrivateLanAddr } from "./lan-guard";
+
 // ── Idempotency guard ────────────────────────────────────────
 // A POS may re-send a job on retry (flaky network, reconnect). We dedup on
 // an idempotency key so the same ticket never prints twice within the window.
@@ -108,6 +110,25 @@ export function startBridgeServer(): http.Server {
       res.writeHead(status, { ...CORS_HEADERS, "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     };
+
+    // Off-box callers are held to the branch LAN and to the POS routes, BEFORE
+    // any handler runs. Refusing here rather than per-route means a route added
+    // later is loopback-only until someone deliberately puts it on the list —
+    // the safe direction for a process that owns the encrypted store.
+    if (!isLoopbackAddr(req.socket.remoteAddress)) {
+      if (!loadConfig().lanAccess) {
+        send(403, { ok: false, error: "lan_access_disabled" });
+        return;
+      }
+      if (!isPrivateLanAddr(req.socket.remoteAddress)) {
+        send(403, { ok: false, error: "not_local_network" });
+        return;
+      }
+      if (!isLanRouteAllowed(req.url)) {
+        send(403, { ok: false, error: "route_not_available_over_lan" });
+        return;
+      }
+    }
 
     if (req.method === "GET" && req.url === "/ping") {
       const config = loadConfig();
@@ -515,8 +536,17 @@ export function startBridgeServer(): http.Server {
     }
   });
 
-  server.listen(BRIDGE_PORT, "127.0.0.1", () => {
-    logger.info(`[bridge] listening on http://127.0.0.1:${BRIDGE_PORT}`);
+  // Bind the LAN interface only when the branch has opted in. A bind address is
+  // not a security boundary on its own — the guards above are — but keeping the
+  // default at loopback means an install that never enables this is unreachable
+  // from the network no matter what changes upstream.
+  const lan = loadConfig().lanAccess === true;
+  const host = lan ? "0.0.0.0" : "127.0.0.1";
+  server.listen(BRIDGE_PORT, host, () => {
+    logger.info(
+      `[bridge] listening on http://${host}:${BRIDGE_PORT}` +
+        (lan ? " (LAN access ON — private ranges + POS routes + session token only)" : "")
+    );
   });
 
   return server;

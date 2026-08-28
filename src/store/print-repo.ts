@@ -154,7 +154,67 @@ export function getRoutingSnapshot() {
     stations,
     mirroredRoutes: getMirroredRoutes(),
     localRoutes: getLocalRoutes(),
+    routerCoverage: getRouterCoverage(),
   };
+}
+
+/**
+ * What the mirrored Ticket Router actually says, summarised per station.
+ *
+ * On site, "the kitchen got no ticket" has three completely different causes —
+ * the item is routed somewhere else, the item is routed NOWHERE (catch-all), or
+ * the item is deliberately barred from paper. Without this the operator cannot
+ * tell them apart and reaches for the routing override, which fixes only the
+ * first. Counts are cheap (one scan of a mirrored table) and read-only.
+ */
+export function getRouterCoverage(): {
+  warm: boolean;
+  items: number;
+  suppressed: number;
+  unrouted: number;
+  perStation: Record<string, number>;
+  modifiersWithOwnLine: number;
+} {
+  const d = getStore();
+  const empty = { warm: false, items: 0, suppressed: 0, unrouted: 0, perStation: {}, modifiersWithOwnLine: 0 };
+  let rows: Array<{ stations?: string; suppressed?: number }>;
+  try {
+    rows = d.prepare("SELECT stations, suppressed FROM menu_item_routing").all() as Array<{
+      stations?: string;
+      suppressed?: number;
+    }>;
+  } catch {
+    // Table absent (agent updated, snapshot not pulled yet) — "not warm" is a
+    // different answer from "nothing routed" and must not read as the latter.
+    return empty;
+  }
+  if (rows.length === 0) return empty;
+
+  const perStation: Record<string, number> = {};
+  let suppressed = 0;
+  let unrouted = 0;
+  for (const r of rows) {
+    if (r.suppressed === 1) {
+      suppressed++;
+      continue;
+    }
+    let stations: string[] = [];
+    try {
+      const parsed = JSON.parse(r.stations || "[]");
+      if (Array.isArray(parsed)) stations = parsed.filter((x) => typeof x === "string");
+    } catch {
+      stations = [];
+    }
+    if (stations.length === 0) unrouted++;
+    for (const st of stations) perStation[st] = (perStation[st] ?? 0) + 1;
+  }
+  let modifiersWithOwnLine = 0;
+  try {
+    modifiersWithOwnLine = (d.prepare("SELECT COUNT(*) c FROM modifier_routing").get() as { c: number }).c;
+  } catch {
+    modifiersWithOwnLine = 0;
+  }
+  return { warm: true, items: rows.length, suppressed, unrouted, perStation, modifiersWithOwnLine };
 }
 
 export function getStation(stationId: string | null): StationRow | null {
