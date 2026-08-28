@@ -67,10 +67,17 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "Kliovo-Print-Agent-${VERSION}.apk"
           echo "apk=android/Kliovo-Print-Agent-${VERSION}.apk" >> "$GITHUB_OUTPUT"
 
+      # A convenience copy for testing a main build, NOT the distribution path —
+      # tags attach the APK to the release below, which does not consume Actions
+      # artifact storage. So a full artifact quota must never fail an otherwise
+      # green build: it would report a compile failure that did not happen.
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: apk
           path: android/Kliovo-Print-Agent-*.apk
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/')
