@@ -39,27 +39,37 @@ data class PrinterEntry(
     val isAddressable: Boolean
         get() = if (isBluetooth) !bluetoothAddress.isNullOrBlank() else !host.isNullOrBlank()
 
+    /**
+     * Absent keys, never JSONObject.NULL. Android's `optString` renders the NULL
+     * sentinel as the literal string "null", so a Bluetooth printer would read
+     * back with host = "null" — a value that looks set, passes an isNullOrBlank
+     * check, and sends the agent to a hostname that does not exist.
+     */
     fun toJson(): JSONObject = JSONObject().apply {
         put("printerId", printerId)
         put("agentKey", agentKey)
         put("name", name)
         put("connection", connection)
-        put("bluetoothAddress", bluetoothAddress ?: JSONObject.NULL)
-        put("host", host ?: JSONObject.NULL)
+        bluetoothAddress?.let { put("bluetoothAddress", it) }
+        host?.let { put("host", it) }
         put("port", port)
-        put("chunkSizeBytes", chunkSizeBytes ?: JSONObject.NULL)
-        put("interChunkDelayMs", interChunkDelayMs ?: JSONObject.NULL)
+        chunkSizeBytes?.let { put("chunkSizeBytes", it) }
+        interChunkDelayMs?.let { put("interChunkDelayMs", it) }
     }
 
     companion object {
+        /** Reads a key as a real null when it is absent OR the NULL sentinel. */
+        private fun JSONObject.optStringOrNull(key: String): String? =
+            if (isNull(key)) null else optString(key).trim().ifBlank { null }
+
         fun fromJson(o: JSONObject): PrinterEntry = PrinterEntry(
-            printerId = o.optString("printerId"),
-            agentKey = o.optString("agentKey"),
-            name = o.optString("name").ifBlank { o.optString("printerId") },
-            connection = o.optString("connection").ifBlank { "network" },
-            bluetoothAddress = o.optString("bluetoothAddress").ifBlank { null },
-            host = o.optString("host").ifBlank { null },
-            port = if (o.has("port") && o.optInt("port") > 0) o.optInt("port") else 9100,
+            printerId = o.optStringOrNull("printerId").orEmpty(),
+            agentKey = o.optStringOrNull("agentKey").orEmpty(),
+            name = o.optStringOrNull("name") ?: o.optStringOrNull("printerId").orEmpty(),
+            connection = o.optStringOrNull("connection") ?: "network",
+            bluetoothAddress = o.optStringOrNull("bluetoothAddress"),
+            host = o.optStringOrNull("host"),
+            port = if (o.optInt("port") > 0) o.optInt("port") else 9100,
             chunkSizeBytes = if (o.optInt("chunkSizeBytes", 0) > 0) o.optInt("chunkSizeBytes") else null,
             interChunkDelayMs = if (o.optLong("interChunkDelayMs", -1) >= 0) o.optLong("interChunkDelayMs") else null,
         )

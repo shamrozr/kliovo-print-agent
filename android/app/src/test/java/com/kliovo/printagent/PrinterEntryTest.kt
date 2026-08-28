@@ -23,6 +23,17 @@ class PrinterEntryTest {
         assertEquals(list, back)
     }
 
+    @Test fun `an absent address reads back as null, never the string "null"`() {
+        // Android's optString renders the JSONObject.NULL sentinel as the
+        // literal "null", which looks set, survives isNullOrBlank, and sends the
+        // agent to a hostname that does not exist.
+        val bluetoothOnly = bt()
+        val back = PrinterEntry.listFromJson(PrinterEntry.listToJson(listOf(bluetoothOnly))).single()
+        assertEquals(null, back.host)
+        assertEquals(null, back.chunkSizeBytes)
+        assertTrue(back.isAddressable)
+    }
+
     @Test fun `garbage json yields no printers rather than a crash`() {
         assertTrue(PrinterEntry.listFromJson("{not json").isEmpty())
         assertTrue(PrinterEntry.listFromJson(null).isEmpty())
