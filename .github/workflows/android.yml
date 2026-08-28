@@ -32,7 +32,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Pinned: the action defaults to the newest Gradle, and AGP 8.5 does not
+      # support Gradle 9 — an unpinned runner silently changes the toolchain
+      # under a build that has nothing to do with the change being tested.
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
       # Release signing when the secrets exist; otherwise the build falls back
       # to the debug key (installs fine for sideloading, but the signature

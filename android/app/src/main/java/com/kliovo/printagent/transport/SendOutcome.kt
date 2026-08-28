@@ -8,29 +8,26 @@ package com.kliovo.printagent.transport
  * is allowed only when we can PROVE nothing reached the printer. Anything after
  * the connection is established may already be on the tape, and a retry there
  * prints a second ticket.
+ *
+ * `message` is a constructor property on the base class rather than a computed
+ * one, so the subclasses cannot each redeclare it.
  */
-sealed class SendOutcome {
-    object Ok : SendOutcome()
+sealed class SendOutcome(val message: String) {
+
+    object Ok : SendOutcome("ok")
 
     /** Provably zero bytes written — the socket never finished connecting. */
-    data class ConnectFailed(val message: String) : SendOutcome() 
+    class ConnectFailed(message: String) : SendOutcome(message)
 
     /** Connected, then failed. Some bytes may have printed. Never retry. */
-    data class WriteFailed(val message: String) : SendOutcome()
+    class WriteFailed(message: String) : SendOutcome(message)
 
     /**
      * Unclassifiable. Treated as "may have printed" — never retried — matching
      * the conservative bias of the post-connect branch.
      */
-    data class Unknown(val message: String) : SendOutcome()
+    class Unknown(message: String) : SendOutcome(message)
 
     val isOk: Boolean get() = this is Ok
     val isRetryable: Boolean get() = this is ConnectFailed
-    val message: String
-        get() = when (this) {
-            is Ok -> "ok"
-            is ConnectFailed -> message
-            is WriteFailed -> message
-            is Unknown -> message
-        }
 }
