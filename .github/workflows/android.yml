@@ -1,0 +1,74 @@
+name: Android APK
+
+# No `paths` filter on purpose: a path filter applies to tag pushes too, and a
+# tag whose commit touched nothing under android/ would silently skip the APK —
+# the release would ship with installers for two platforms out of three.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    paths: ["android/**"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    # `secrets` is not available in a step-level `if`, so the presence of a
+    # keystore is surfaced as an env var the step CAN test.
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Release signing when the secrets exist; otherwise the build falls back
+      # to the debug key (installs fine for sideloading, but the signature
+      # changes when real keys arrive, which forces an uninstall on every
+      # tablet). Set these before shipping to branches.
+      - name: Write signing config
+        if: env.KEYSTORE_B64 != ''
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > release.keystore
+          cat > keystore.properties <<PROPS
+          storeFile=release.keystore
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          PROPS
+
+      - name: Unit tests
+        run: gradle --no-daemon testReleaseUnitTest
+
+      - name: Build APK
+        run: gradle --no-daemon assembleRelease
+
+      - name: Name the artifact after the version
+        id: rename
+        run: |
+          VERSION=$(grep -m1 'versionName = ' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
+          cp app/build/outputs/apk/release/app-release.apk "Kliovo-Print-Agent-${VERSION}.apk"
+          echo "apk=android/Kliovo-Print-Agent-${VERSION}.apk" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: android/Kliovo-Print-Agent-*.apk
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" Kliovo-Print-Agent-*.apk --clobber

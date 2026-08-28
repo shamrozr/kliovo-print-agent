@@ -1,0 +1,3 @@
+<resources>
+  <style name="Theme.KliovoPrintAgent" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

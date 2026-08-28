@@ -1,0 +1,5 @@
+<resources>
+  <string name="app_name">Kliovo Print Agent</string>
+  <string name="channel_name">Print agent</string>
+  <string name="channel_desc">Keeps the printer connected while the till is open</string>
+</resources>
