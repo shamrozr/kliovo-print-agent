@@ -84,3 +84,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${GITHUB_REF_NAME}" Kliovo-Print-Agent-*.apk --clobber
+
+      # Keep only the newest 4 artifacts in this repo. GitHub has no count-based
+      # retention — only an age in days — so a workflow that saves an installer
+      # on every run fills the ACCOUNT-WIDE artifact quota and then blocks
+      # uploads in every other repo. That is exactly what happened on
+      # 2026-08-29: a green Android build reported failure because there was no
+      # room left to store its APK.
+      #
+      # Never fails the build. Losing an old artifact is housekeeping; failing a
+      # release over housekeeping is not.
+      - name: Keep only the 4 newest artifacts
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts" --paginate \
+            --jq '.artifacts[] | select(.expired==false) | [.created_at,.id] | @tsv' \
+            | sort -r | tail -n +5 | cut -f2 | while read -r id; do
+              [ -z "$id" ] && continue
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/$id" >/dev/null 2>&1 || true
+            done
