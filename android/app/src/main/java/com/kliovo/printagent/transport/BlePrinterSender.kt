@@ -24,6 +24,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * BLE (GATT) transport for thermal printers.
@@ -144,7 +145,10 @@ object BlePrinterSender {
         val connected = CompletableDeferred<Boolean>()
         val discovered = CompletableDeferred<Boolean>()
         val mtuSettled = CompletableDeferred<Int>()
-        @Volatile var writeAck: CompletableDeferred<Boolean>? = null
+        // AtomicReference, not @Volatile — that annotation cannot apply to a
+        // local, and the GATT callback runs on a binder thread, so the handoff
+        // to it needs real visibility either way.
+        val writeAck = AtomicReference<CompletableDeferred<Boolean>?>(null)
         var gatt: BluetoothGatt? = null
         // Only flips once a byte has actually been handed to the stack — the
         // same pre/post boundary the Classic and TCP transports use to decide
@@ -172,7 +176,7 @@ object BlePrinterSender {
             }
 
             override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
-                writeAck?.takeIf { !it.isCompleted }?.complete(status == BluetoothGatt.GATT_SUCCESS)
+                writeAck.get()?.takeIf { !it.isCompleted }?.complete(status == BluetoothGatt.GATT_SUCCESS)
             }
         }
 
@@ -210,7 +214,7 @@ object BlePrinterSender {
                 val end = minOf(offset + chunkSize, bytes.size)
                 val slice = bytes.copyOfRange(offset, end)
                 val ack = CompletableDeferred<Boolean>()
-                writeAck = ack
+                writeAck.set(ack)
 
                 val queued = writeChunk(gatt, target, slice)
                 if (!queued) {
