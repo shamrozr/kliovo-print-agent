@@ -26,6 +26,7 @@ import com.kliovo.printagent.config.ConfigStore
 import com.kliovo.printagent.config.PrinterEntry
 import com.kliovo.printagent.health.HealthTracker
 import com.kliovo.printagent.service.PrintAgentService
+import com.kliovo.printagent.transport.BlePrinterSender
 import com.kliovo.printagent.transport.BluetoothPrinterSender
 import com.kliovo.printagent.transport.Deliver
 import com.kliovo.printagent.transport.PairedDevice
@@ -60,6 +61,9 @@ private fun AgentScreen() {
         val needed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
         } else {
+            // Below 31 a BLE scan counts as a location fix, and without it the
+            // scan returns an empty list with no error — which reads as "no
+            // printers exist".
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
         permissionLauncher.launch(needed)
@@ -230,29 +234,66 @@ private fun PrinterEditor(
     var printerId by remember { mutableStateOf(initial.printerId) }
     var agentKey by remember { mutableStateOf(initial.agentKey) }
     var isBluetooth by remember { mutableStateOf(initial.isBluetooth) }
+    var isBleDevice by remember { mutableStateOf(initial.isBle) }
     var address by remember { mutableStateOf(initial.bluetoothAddress.orEmpty()) }
     var host by remember { mutableStateOf(initial.host.orEmpty()) }
     var port by remember { mutableStateOf(initial.port.toString()) }
+    // Paired (Classic) and nearby (BLE) are ONE list to the operator. They have
+    // no way to know which radio their printer speaks, and the common complaint
+    // — "it never shows up in Android's Bluetooth settings" — is precisely a
+    // BLE printer, which cannot be paired at all and is only ever found by
+    // scanning. A picker that showed only paired devices could never list it.
     var paired by remember { mutableStateOf<List<PairedDevice>>(emptyList()) }
+    var nearby by remember { mutableStateOf<List<PairedDevice>>(emptyList()) }
+    var scanning by remember { mutableStateOf(false) }
     var pickerNote by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     fun refreshPaired() {
         when {
             !BluetoothPrinterSender.hasPermission(context) -> {
-                pickerNote = "Allow Bluetooth access to see paired printers."
+                pickerNote = "Allow Bluetooth access to see printers."
                 onRequestPermission()
             }
             !BluetoothPrinterSender.isEnabled(context) -> pickerNote = "Bluetooth is off — turn it on, then refresh."
             else -> {
                 paired = BluetoothPrinterSender.listPairedDevices(context)
-                pickerNote = if (paired.isEmpty())
-                    "No paired printers. Pair the printer in Android Settings → Bluetooth first, then refresh."
-                else null
+                pickerNote = null
             }
         }
     }
 
-    LaunchedEffect(isBluetooth) { if (isBluetooth) refreshPaired() }
+    fun scanNearby() {
+        if (scanning) return
+        if (!BlePrinterSender.hasPermissions(context)) {
+            pickerNote = "Allow Bluetooth access to scan for printers."
+            onRequestPermission()
+            return
+        }
+        if (!BluetoothPrinterSender.isEnabled(context)) {
+            pickerNote = "Bluetooth is off — turn it on, then scan."
+            return
+        }
+        scanning = true
+        pickerNote = "Scanning for nearby printers…"
+        scope.launch {
+            nearby = BlePrinterSender.scan(context)
+            scanning = false
+            pickerNote = if (paired.isEmpty() && nearby.isEmpty())
+                "Nothing found. Switch the printer on and hold it close, then scan again."
+            else null
+        }
+    }
+
+    LaunchedEffect(isBluetooth) {
+        if (isBluetooth) {
+            refreshPaired()
+            // Scan straight away: a BLE printer is invisible until we do, and
+            // making the operator find a second button first is how they
+            // conclude the app cannot see their printer.
+            scanNearby()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -284,20 +325,34 @@ private fun PrinterEditor(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Paired printers", style = MaterialTheme.typography.labelLarge)
-                        TextButton(onClick = { refreshPaired() }) { Text("Refresh") }
+                        Text("Printers", style = MaterialTheme.typography.labelLarge)
+                        TextButton(enabled = !scanning, onClick = { refreshPaired(); scanNearby() }) {
+                            Text(if (scanning) "Scanning…" else "Scan")
+                        }
                     }
                     pickerNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    paired.forEach { device ->
+
+                    val pairedAddresses = paired.map { it.address.uppercase() }.toSet()
+                    val rows = paired.map { it to "Paired" } +
+                        nearby.filter { it.address.uppercase() !in pairedAddresses }.map { it to "Nearby" }
+
+                    rows.forEach { (device, kind) ->
                         ListItem(
                             headlineContent = { Text(device.name) },
-                            supportingContent = { Text(device.address, style = MaterialTheme.typography.bodySmall) },
+                            supportingContent = {
+                                Text("$kind · ${device.address}", style = MaterialTheme.typography.bodySmall)
+                            },
                             trailingContent = {
                                 RadioButton(
                                     selected = address.equals(device.address, ignoreCase = true),
                                     onClick = {
                                         address = device.address
                                         if (name.isBlank()) name = device.name
+                                        // Remember which radio found it, so the
+                                        // send path does not have to re-derive
+                                        // it against a printer that is switched
+                                        // off at the time.
+                                        isBleDevice = kind == "Nearby"
                                     },
                                 )
                             },
@@ -328,7 +383,7 @@ private fun PrinterEditor(
                             printerId = printerId.trim(),
                             agentKey = agentKey.trim(),
                             name = name.trim().ifBlank { printerId.trim() },
-                            connection = if (isBluetooth) "bluetooth" else "network",
+                            connection = if (!isBluetooth) "network" else if (isBleDevice) "ble" else "bluetooth",
                             bluetoothAddress = address.trim().ifBlank { null },
                             host = host.trim().ifBlank { null },
                             port = port.toIntOrNull() ?: 9100,

@@ -15,7 +15,11 @@ data class PrinterEntry(
     val printerId: String,
     val agentKey: String,
     val name: String,
-    /** "bluetooth" — paired SPP printer · "network" — raw TCP, port 9100. */
+    /**
+     * "bluetooth" — Classic SPP, paired in Android's settings
+     * "ble"       — BLE/GATT, discovered by scanning and never paired
+     * "network"   — raw TCP, port 9100
+     */
     val connection: String,
     /** Bluetooth only: the paired device MAC, e.g. "AA:BB:CC:DD:EE:FF". */
     val bluetoothAddress: String? = null,
@@ -30,7 +34,10 @@ data class PrinterEntry(
     val chunkSizeBytes: Int? = null,
     val interChunkDelayMs: Long? = null,
 ) {
-    val isBluetooth: Boolean get() = connection == "bluetooth"
+    val isBle: Boolean get() = connection == "ble"
+
+    /** Either radio — both address a printer by MAC rather than by host. */
+    val isBluetooth: Boolean get() = connection == "bluetooth" || isBle
 
     /** A row that can actually be polled — anything else only burns requests. */
     val isPollable: Boolean get() = printerId.isNotBlank() && agentKey.isNotBlank()

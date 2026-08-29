@@ -140,6 +140,18 @@ object BluetoothPrinterSender {
     fun isEnabled(context: Context): Boolean = adapter(context)?.isEnabled == true
 
     /**
+     * Has Android paired with this device? A BLE-only printer never can be,
+     * which is what makes this the transport test rather than a UI hint.
+     */
+    @SuppressLint("MissingPermission")
+    fun isBonded(context: Context, address: String): Boolean {
+        if (address.isBlank() || !hasPermission(context)) return false
+        return runCatching {
+            adapter(context)?.bondedDevices.orEmpty().any { it.address.equals(address, ignoreCase = true) }
+        }.getOrDefault(false)
+    }
+
+    /**
      * Printers this tablet is paired with, for the settings picker. Returns an
      * empty list rather than throwing when Bluetooth is off or the permission
      * is missing — the caller decides how to explain it, and the picker must

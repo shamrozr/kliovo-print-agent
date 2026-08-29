@@ -7,6 +7,7 @@ import com.kliovo.printagent.config.ConfigStore
 import com.kliovo.printagent.health.HealthTracker
 import com.kliovo.printagent.health.PrintResult
 import com.kliovo.printagent.ledger.PrintedJobsLedger
+import com.kliovo.printagent.transport.BlePrinterSender
 import com.kliovo.printagent.transport.BluetoothPrinterSender
 import com.kliovo.printagent.transport.Deliver
 import fi.iki.elonen.NanoHTTPD
@@ -71,15 +72,24 @@ class BridgeServer(
                 // Paired Bluetooth printers on THIS tablet. Dine's printer form
                 // calls this so an admin picks a printer by name instead of
                 // typing a MAC address off the back of the device.
-                session.method == Method.GET && uri == "/bluetooth/devices" -> json(
-                    JSONObject()
-                        .put("ok", true)
-                        .put("permissionGranted", BluetoothPrinterSender.hasPermission(context))
-                        .put("bluetoothEnabled", BluetoothPrinterSender.isEnabled(context))
-                        .put("devices", JSONArray(BluetoothPrinterSender.listPairedDevices(context).map {
-                            JSONObject().put("address", it.address).put("name", it.name)
-                        }))
-                )
+                session.method == Method.GET && uri == "/bluetooth/devices" -> {
+                    // Paired (Classic) AND nearby (BLE). A BLE printer can never
+                    // be paired, so a paired-only list would hide exactly the
+                    // printers people cannot find in Android's settings either.
+                    val paired = BluetoothPrinterSender.listPairedDevices(context)
+                        .map { JSONObject().put("address", it.address).put("name", it.name).put("kind", "paired") }
+                    val pairedAddresses = paired.map { it.getString("address").uppercase() }.toSet()
+                    val nearby = runBlocking { BlePrinterSender.scan(context) }
+                        .filter { it.address.uppercase() !in pairedAddresses }
+                        .map { JSONObject().put("address", it.address).put("name", it.name).put("kind", "ble") }
+                    json(
+                        JSONObject()
+                            .put("ok", true)
+                            .put("permissionGranted", BluetoothPrinterSender.hasPermission(context))
+                            .put("bluetoothEnabled", BluetoothPrinterSender.isEnabled(context))
+                            .put("devices", JSONArray(paired + nearby))
+                    )
+                }
 
                 session.method == Method.POST && uri == "/print" -> handlePrint(session)
 
