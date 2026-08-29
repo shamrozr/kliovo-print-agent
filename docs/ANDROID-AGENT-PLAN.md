@@ -93,14 +93,36 @@ android/
 
 | # | Work | Status |
 |---|---|---|
-| 1 | Gradle scaffold, manifest, permissions, theme | pending |
-| 2 | Config store (printers: bluetooth \| network) + ledger | pending |
-| 3 | Transports: TCP + Bluetooth, shared outcome model | pending |
-| 4 | Cloud poll/ACK/NACK loop with pacing + dedup header | pending |
-| 5 | Foreground service, boot receiver, battery-exemption prompt | pending |
-| 6 | Local bridge on 127.0.0.1:6310 (`/ping`, `/status`, `/print`) + CORS PNA | pending |
-| 7 | Compose UI: printers, paired-device picker, test print, health | pending |
-| 8 | CI: build APK, attach to release; Dine `/downloads` product entry | pending |
+| 1 | Gradle scaffold, manifest, permissions, theme | **done** |
+| 2 | Config store (printers: bluetooth \| network) + ledger | **done** |
+| 3 | Transports: TCP + Bluetooth, shared outcome model | **done** |
+| 4 | Cloud poll/ACK/NACK loop with pacing + dedup header | **done** |
+| 5 | Foreground service, boot receiver, battery-exemption prompt | **done** |
+| 6 | Local bridge on 127.0.0.1:6310 (`/ping`, `/status`, `/print`) + CORS PNA | **done** |
+| 7 | Compose UI: printers, paired-device picker, test print, health | **done** |
+| 8 | CI: build APK, attach to release; Dine `/downloads` product entry | **done** — APK signing secrets still unset (debug-signed until then) |
+
+## Verified
+
+CI run 33222088586 — unit tests pass, `assembleRelease` produces the APK. Three
+real defects the local machine could not have caught, in order:
+
+1. `SendOutcome` declared a `message` its subclasses also declared — a compile
+   error, and the reason a build gate exists at all.
+2. CI resolved Gradle 9.7.1 against AGP 8.5. Now pinned: an unpinned toolchain
+   changes under builds that never touched it.
+3. **Android's `optString` renders the `JSONObject.NULL` sentinel as the literal
+   string `"null"`.** A Bluetooth printer round-tripped with `host = "null"` — a
+   value that looks set, survives `isNullOrBlank`, and sends the agent to a
+   hostname that does not exist. On a tablet that reads as "the printer just
+   doesn't work", with nothing on screen to explain it. Null keys are omitted on
+   write and read through `isNull()` now, pinned by a test.
+
+A fourth red was not a defect: a full Actions artifact quota failed the upload
+step of an otherwise-green build. That step is `continue-on-error` now, because
+reporting a compile failure that did not happen is the worst kind of red — and
+distribution goes through the release upload on a tag, which does not consume
+artifact storage.
 
 ## Android specifics that bite
 
