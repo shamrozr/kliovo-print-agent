@@ -1,4 +1,5 @@
 import { loadConfig } from "./config";
+import { planPushSettlement } from "./cloud-push-plan";
 import {
   applyMirror,
   setState,
@@ -225,12 +226,19 @@ async function pushOnce(): Promise<void> {
   }
 
   const body = (await res.json().catch(() => null)) as
-    | { accepted?: number; enabled?: boolean }
+    | { accepted?: number; enabled?: boolean; retry?: string[] }
     | null;
   if (!body || body.enabled === false) return;
+
+  // A 200 is not "synced" — see planPushSettlement.
+  const { settled, retry } = planPushSettlement(toPush, body);
+  if (retry.length > 0) {
+    logger.warn(`[cloud-sync] server asked to retry ${retry.length} offline orders — keeping them queued`);
+  }
+  if (settled.length === 0) return;
   try {
-    const marked = markOrdersPushed(toPush.map((t) => t.orderId));
-    logger.info(`[cloud-sync] pushed ${toPush.length} offline orders (accepted ${body.accepted ?? 0}, marked ${marked.marked})`);
+    const marked = markOrdersPushed(settled.map((t) => t.orderId));
+    logger.info(`[cloud-sync] pushed ${toPush.length} offline orders (accepted ${body.accepted ?? 0}, retry ${retry.length}, marked ${marked.marked})`);
   } catch (e) {
     logger.warn(`[cloud-sync] markOrdersPushed failed: ${(e as Error).message}`);
   }
