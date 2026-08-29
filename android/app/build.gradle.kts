@@ -23,8 +23,11 @@ android {
     applicationId = "com.kliovo.printagent"
     minSdk = 24
     targetSdk = 34
-    versionCode = 1
-    versionName = "1.0.0"
+    // Kept in step with package.json — the desktop installers and the APK are
+    // ONE product on /downloads, and two version numbers under one name is a
+    // support call waiting to happen. versionCode is versionName as digits.
+    versionCode = 21101
+    versionName = "2.11.1"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
