@@ -59,6 +59,69 @@ object BluetoothPrinterSender {
     private const val CONNECT_TIMEOUT_MS = 8_000L
     private const val WRITE_TIMEOUT_MS = 20_000L
 
+    /**
+     * How long to wait after the final byte before closing the socket. Closing
+     * discards anything still buffered in the radio, so without this a short
+     * ticket can be written "successfully" and never reach paper.
+     */
+    private const val CLOSE_SETTLE_MS = 400L
+
+    private class OpenedSocket(val socket: BluetoothSocket?, val error: String?, val method: String?)
+
+    /**
+     * Which rung of the ladder last worked, for the settings screen. On site,
+     * "it connects but only the insecure way" is the single most useful fact
+     * about a printer, and it is invisible from anywhere else.
+     */
+    @Volatile
+    var lastConnectMethod: String? = null
+        private set
+
+    /**
+     * Open an RFCOMM channel, trying the three ways real printers actually
+     * accept, in order. Every cheap-printer app on the store does some version
+     * of this ladder, and skipping it is why a printer that works everywhere
+     * else fails here:
+     *
+     *  1. **Secure SPP** — correct, and what a well-behaved printer wants.
+     *  2. **Insecure SPP** — many cheap boards implement no SSP/pairing dance
+     *     and refuse the secure channel outright ("read failed, socket might
+     *     closed or timeout, read ret: -1"). This is the most common fix.
+     *  3. **Reflected `createRfcommSocket(1)`** — the last-resort hack for
+     *     firmware whose SDP record is missing or wrong, so neither UUID lookup
+     *     resolves. Channel 1 is where these boards always sit.
+     *
+     * Every rung is PRE-connect, so falling through them cannot double-print:
+     * a rung that fails wrote nothing by definition.
+     */
+    @SuppressLint("MissingPermission")
+    private fun openSocket(device: BluetoothDevice, address: String): OpenedSocket {
+        val failures = mutableListOf<String>()
+
+        val attempts: List<Pair<String, () -> BluetoothSocket>> = listOf(
+            "secure" to { device.createRfcommSocketToServiceRecord(SPP_UUID) },
+            "insecure" to { device.createInsecureRfcommSocketToServiceRecord(SPP_UUID) },
+            "channel1" to {
+                val m = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                m.invoke(device, 1) as BluetoothSocket
+            },
+        )
+
+        for ((name, open) in attempts) {
+            var candidate: BluetoothSocket? = null
+            try {
+                candidate = open()
+                candidate.connect()
+                lastConnectMethod = name
+                return OpenedSocket(candidate, null, name)
+            } catch (e: Exception) {
+                runCatching { candidate?.close() }
+                failures += "$name: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+        return OpenedSocket(null, "Bluetooth connect failed to $address — ${failures.joinToString(" | ")}", null)
+    }
+
     private val deviceLocks = ConcurrentHashMap<String, Mutex>()
     private fun lockFor(address: String): Mutex = deviceLocks.computeIfAbsent(address) { Mutex() }
 
@@ -120,19 +183,14 @@ object BluetoothPrinterSender {
             // point may have put bytes on the wire.
             var connected = false
             try {
-                socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
-                try {
-                    withTimeout(CONNECT_TIMEOUT_MS) {
-                        // An in-progress system discovery starves connect(); we
-                        // never scan ourselves, but something else might be.
-                        runCatching { adapter.cancelDiscovery() }
-                        socket.connect()
-                    }
-                } catch (e: Exception) {
-                    // Closing is what actually aborts a hung connect().
-                    runCatching { socket.close() }
-                    val reason = e.message ?: e.javaClass.simpleName
-                    return@withLock SendOutcome.ConnectFailed("Bluetooth connect failed to $address — $reason")
+                // An in-progress system discovery starves connect(); we never
+                // scan ourselves, but something else on the tablet might.
+                runCatching { adapter.cancelDiscovery() }
+
+                val opened = openSocket(device, address)
+                socket = opened.socket
+                if (socket == null) {
+                    return@withLock SendOutcome.ConnectFailed(opened.error ?: "Bluetooth connect failed to $address")
                 }
                 connected = true
 
@@ -155,6 +213,12 @@ object BluetoothPrinterSender {
                     offset = end
                     if (offset < bytes.size && interChunkDelayMs > 0) delay(interChunkDelayMs)
                 }
+                // Let the last chunk drain before the socket closes. Closing an
+                // RFCOMM socket discards whatever the radio has not yet pushed,
+                // and on a slow bridge chip that is the tail of the ticket — or,
+                // for a short one, the WHOLE ticket. This is why a job can look
+                // perfectly successful here and produce no paper at all.
+                delay(CLOSE_SETTLE_MS)
                 SendOutcome.Ok
             } catch (e: Exception) {
                 val reason = e.message ?: e.javaClass.simpleName

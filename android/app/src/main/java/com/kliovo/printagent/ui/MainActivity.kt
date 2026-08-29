@@ -147,7 +147,10 @@ private fun AgentScreen() {
                                     TextButton(onClick = {
                                         scope.launch {
                                             val outcome = Deliver.deliver(context, p, testTicket())
-                                            message = if (outcome.isOk) "Test sent to ${p.name}" else outcome.message
+                                            message = if (outcome.isOk) {
+                                                val via = BluetoothPrinterSender.lastConnectMethod
+                                                "Test sent to ${p.name}" + if (p.isBluetooth && via != null) " (connected: $via)" else ""
+                                            } else outcome.message
                                         }
                                     }) { Text("Test") }
                                     TextButton(onClick = { editing = p }) { Text("Edit") }
@@ -197,10 +200,21 @@ private fun AgentScreen() {
  * tickets are always rendered by the server so the two platforms cannot drift.
  */
 private fun testTicket(): ByteArray {
-    val esc = byteArrayOf(0x1B, 0x40) // init
-    val body = "Kliovo Print Agent\nTest print OK\n\n\n".toByteArray(Charsets.US_ASCII)
-    val cut = byteArrayOf(0x1D, 0x56, 0x00)
-    return esc + body + cut
+    val init = byteArrayOf(0x1B, 0x40)                       // ESC @
+    val center = byteArrayOf(0x1B, 0x61, 0x01)               // ESC a 1
+    val doubleOn = byteArrayOf(0x1D, 0x21, 0x11)             // GS ! double w+h
+    val doubleOff = byteArrayOf(0x1D, 0x21, 0x00)
+    val left = byteArrayOf(0x1B, 0x61, 0x00)
+    // Feed past the tear bar BEFORE cutting. Without the feed a cutter-less
+    // printer leaves the text inside the mechanism, which reads as "nothing
+    // printed" even when every byte arrived.
+    val feed = byteArrayOf(0x1B, 0x64, 0x04)                 // ESC d 4
+    val cut = byteArrayOf(0x1D, 0x56, 0x00)                  // GS V 0 (ignored if no cutter)
+    return init + center + doubleOn +
+        "KLIOVO\n".toByteArray(Charsets.US_ASCII) + doubleOff +
+        "Print agent test\n".toByteArray(Charsets.US_ASCII) + left +
+        "--------------------------------\nIf you can read this, the printer\nis connected correctly.\n".toByteArray(Charsets.US_ASCII) +
+        feed + cut
 }
 
 @Composable
