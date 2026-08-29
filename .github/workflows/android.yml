@@ -97,6 +97,8 @@ jobs:
       - name: Keep only the 4 newest artifacts
         if: always()
         continue-on-error: true
+        # `run:` is PowerShell on a Windows runner, and this is bash.
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
