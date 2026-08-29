@@ -11,6 +11,12 @@ on:
     paths: ["android/**"]
   workflow_dispatch:
 
+# The repo default is read-only, so without this the job cannot attach the APK
+# to the release (HTTP 403 on v2.11.1's first attempt) or delete an old artifact.
+permissions:
+  contents: write   # attach the APK to the GitHub Release
+  actions: write    # delete old artifacts (the prune step)
+
 jobs:
   build:
     runs-on: ubuntu-latest
