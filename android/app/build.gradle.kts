@@ -26,8 +26,8 @@ android {
     // Kept in step with package.json — the desktop installers and the APK are
     // ONE product on /downloads, and two version numbers under one name is a
     // support call waiting to happen. versionCode is versionName as digits.
-    versionCode = 21103
-    versionName = "2.11.3"
+    versionCode = 21104
+    versionName = "2.11.4"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 

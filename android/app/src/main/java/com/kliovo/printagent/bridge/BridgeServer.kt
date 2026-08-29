@@ -79,7 +79,9 @@ class BridgeServer(
                     val paired = BluetoothPrinterSender.listPairedDevices(context)
                         .map { JSONObject().put("address", it.address).put("name", it.name).put("kind", "paired") }
                     val pairedAddresses = paired.map { it.getString("address").uppercase() }.toSet()
-                    val nearby = runBlocking { BlePrinterSender.scan(context) }
+                    // Bounded: this holds a request thread, and Dine's picker
+                    // is a form, not a scanner UI.
+                    val nearby = runBlocking { BlePrinterSender.scan(context, timeoutMs = 4_000) }
                         .filter { it.address.uppercase() !in pairedAddresses }
                         .map { JSONObject().put("address", it.address).put("name", it.name).put("kind", "ble") }
                     json(

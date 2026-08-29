@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.kliovo.printagent.KliovoPrintApp
 import com.kliovo.printagent.config.ConfigStore
 import com.kliovo.printagent.config.PrinterEntry
 import com.kliovo.printagent.health.HealthTracker
@@ -51,7 +52,9 @@ private fun AgentScreen() {
     var printers by remember { mutableStateOf(config.printers) }
     var editing by remember { mutableStateOf<PrinterEntry?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    var lastCrash by remember { mutableStateOf(KliovoPrintApp.lastCrash(context)) }
     val health by HealthTracker.perPrinter.collectAsState()
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -67,6 +70,20 @@ private fun AgentScreen() {
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
         permissionLauncher.launch(needed)
+    }
+
+    LaunchedEffect(Unit) {
+        val wanted = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            wanted += Manifest.permission.POST_NOTIFICATIONS
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            wanted += Manifest.permission.BLUETOOTH_CONNECT
+            wanted += Manifest.permission.BLUETOOTH_SCAN
+        } else {
+            wanted += Manifest.permission.ACCESS_FINE_LOCATION
+        }
+        runCatching { permissionLauncher.launch(wanted.toTypedArray()) }
     }
 
     Scaffold(
@@ -93,8 +110,8 @@ private fun AgentScreen() {
                         Button(onClick = {
                             config.serverUrl = serverUrl
                             serverUrl = config.serverUrl
-                            PrintAgentService.start(context)
-                            message = "Agent started"
+                            val failure = PrintAgentService.start(context)
+                            message = failure?.let { "Could not start the agent: $it" } ?: "Agent started"
                         }) { Text("Save & start") }
                         OutlinedButton(onClick = {
                             PrintAgentService.stop(context)
@@ -171,6 +188,32 @@ private fun AgentScreen() {
                     Text(it, Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
                 }
             }
+
+            // A tablet on a counter has no logcat. Without this, the only report
+            // possible is "it keeps crashing", and the exception that names the
+            // bug dies with the process.
+            lastCrash?.let { crash ->
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("The app closed unexpectedly last time", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            crash.take(1200),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(crash))
+                                message = "Crash details copied — paste them to support"
+                            }) { Text("Copy details") }
+                            TextButton(onClick = {
+                                KliovoPrintApp.clearCrash(context)
+                                lastCrash = null
+                            }) { Text("Dismiss") }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -184,15 +227,22 @@ private fun AgentScreen() {
                 printers = config.printers
                 editing = null
                 PrintAgentService.start(context)
+                message = "Printer removed"
             },
             onSave = { saved ->
+                // The printer is saved BEFORE the service is touched. Starting
+                // the agent can fail for reasons that have nothing to do with
+                // the printer (a refused foreground-service type, a background
+                // start limit), and losing the operator's typing to that is
+                // indefensible.
                 config.upsertPrinter(saved)
                 printers = config.printers
                 editing = null
                 // Restart so the new printer's poll loop starts immediately —
                 // a printer that only works after a manual restart reads as
                 // broken to whoever added it.
-                PrintAgentService.start(context)
+                val failure = PrintAgentService.start(context)
+                message = failure?.let { "Printer saved. The agent did not start: $it" } ?: "Printer saved"
             },
         )
     }

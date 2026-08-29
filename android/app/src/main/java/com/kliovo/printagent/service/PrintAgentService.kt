@@ -45,8 +45,8 @@ class PrintAgentService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         startForegroundCompat()
-        acquireWakeLock()
-        restart()
+        runCatching { acquireWakeLock() }
+        runCatching { restart() }
         // STICKY: if Android kills us for memory we want to come back. The
         // printer being reachable is the entire point of this app.
         return START_STICKY
@@ -82,15 +82,37 @@ class PrintAgentService : LifecycleService() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
+        // Android 14 refuses FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE unless
+        // BLUETOOTH_CONNECT is granted at the moment of the call, and it does
+        // that by THROWING — which kills whatever started the service. A user
+        // who has not reached the Bluetooth prompt yet (or declined it) would
+        // therefore crash the app simply by tapping Save.
+        //
+        // So: ask for both types, fall back to dataSync alone, then to no type
+        // at all. A running agent with a weaker service type is worth far more
+        // than a crash.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            val attempts = listOf(
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
+            var started = false
+            for (type in attempts) {
+                try {
+                    startForeground(NOTIFICATION_ID, notification, type)
+                    started = true
+                    break
+                } catch (e: Exception) {
+                    logStartFailure(e)
+                }
+            }
+            if (!started) {
+                runCatching { startForeground(NOTIFICATION_ID, notification) }
+                    .onFailure { logStartFailure(it) }
+            }
         } else {
-            startForeground(NOTIFICATION_ID, notification)
+            runCatching { startForeground(NOTIFICATION_ID, notification) }
+                .onFailure { logStartFailure(it) }
         }
     }
 
@@ -120,17 +142,25 @@ class PrintAgentService : LifecycleService() {
         return null
     }
 
+    private fun logStartFailure(e: Throwable) {
+        android.util.Log.w("PrintAgentService", "startForeground refused: ${e.message}")
+    }
+
     companion object {
         private const val NOTIFICATION_ID = 1001
         private const val SOCKET_READ_TIMEOUT_MS = 15_000
 
-        fun start(context: Context) {
+        /** Returns the failure instead of throwing — the caller is a Save button. */
+        fun start(context: Context): String? = try {
             val intent = Intent(context, PrintAgentService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
             }
+            null
+        } catch (e: Exception) {
+            e.message ?: e.javaClass.simpleName
         }
 
         fun stop(context: Context) {
