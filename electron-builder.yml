@@ -48,4 +48,15 @@ publish:
   provider: github
   owner: shamrozr
   repo: kliovo-print-agent
-  releaseType: release
+  # PRERELEASE for the 2.12.0 drawer pilot.
+  #
+  # This is the field kill-switch, and it is load-bearing. The catalog sync
+  # (app-release.service) reads /releases/latest, which EXCLUDES prereleases,
+  # and maps prerelease -> channel "beta"; /api/print-agent/update serves
+  # channel "stable" ONLY. So a prerelease is downloadable by hand and reaches
+  # NO live agent automatically.
+  #
+  # Flip back to `release` (or promote the GitHub release from prerelease to
+  # latest) once a real drawer has been opened on a pilot till and normal
+  # printing is confirmed unaffected. The fleet then follows within the hour.
+  releaseType: prerelease
