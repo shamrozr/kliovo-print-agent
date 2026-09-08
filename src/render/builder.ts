@@ -1,3 +1,4 @@
+import { buildDrawerKick, type DrawerPin } from "../print/drawer";
 // VENDORED from Kliovo-Dine: src/lib/print/escpos/builder.ts
 // Keep in sync with the canonical source. Pure ESC/POS byte builder (Buffer only).
 
@@ -253,10 +254,22 @@ export class ESCPOSBuilder {
 
   // ── Drawer & cut ─────────────────────────────────────────────
 
-  /** Open cash drawer pin (kicks the drawer). */
-  drawerKick(pin: 0 | 1 = 0): this {
-    // ESC p m t1 t2 — t1=50ms on, t2=120ms wait
-    this.chunks.push(Buffer.from([ESC, 0x70, pin, 0x32, 0x78]));
+  /**
+   * Kick the cash drawer.
+   *
+   * Takes the CONNECTOR pin (2 or 5) that the operator sees in settings, not
+   * the wire value `m` (0 or 1) — so the number picked, stored and passed are
+   * all the same one. Delegates to print/drawer.ts, which is the single place
+   * these bytes are built.
+   *
+   * NOTE — nothing in a receipt or KOT template should call this. The kick is
+   * PREPENDED at delivery, not emitted inside a document: appended after the
+   * cut (which is what Dine's designer did until 2026-09-02) it never fires on
+   * a paper-out or a jam, and a two-copy receipt makes the cashier wait
+   * through both. See src/print/drawer.ts.
+   */
+  drawerKick(pin: DrawerPin = 2, pulseOnMs = 100, pulseOffMs = 240): this {
+    this.chunks.push(buildDrawerKick(pin, pulseOnMs, pulseOffMs));
     return this;
   }
 

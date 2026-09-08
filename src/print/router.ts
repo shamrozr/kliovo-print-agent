@@ -24,6 +24,14 @@ export interface MirroredPrinter {
   gap_type?: string;
   is_default?: number;
   is_active?: number;
+  // Cash drawer wiring. Unlike everything above these NEVER come from the
+  // server mirror — they are agent-local, operator-verified hardware facts
+  // (like host/port), carried through here only so the fire path can reach
+  // them without a second config read. See print/drawer.ts.
+  has_cash_drawer?: number;
+  drawer_pin?: number;
+  drawer_pulse_on_ms?: number;
+  drawer_pulse_off_ms?: number;
 }
 
 export interface MirroredRoute {
@@ -56,6 +64,10 @@ export function toPrinterEntry(p: MirroredPrinter): PrinterEntry {
     labelHeightMm: p.label_height_mm,
     gapType: p.gap_type as PrinterEntry["gapType"],
     labelLanguage: p.label_language as PrinterEntry["labelLanguage"],
+    hasCashDrawer: p.has_cash_drawer === 1,
+    drawerPin: p.drawer_pin === 5 ? 5 : 2,
+    drawerPulseOnMs: p.drawer_pulse_on_ms,
+    drawerPulseOffMs: p.drawer_pulse_off_ms,
   };
 }
 
@@ -100,6 +112,12 @@ export function resolvePrinters(configPrinters: MirroredPrinter[], mirrored: Mir
       host: match.host,
       port: match.port,
       system_printer_name: match.system_printer_name,
+      // Drawer wiring is agent-local by definition, so config always wins —
+      // the mirror never carries it at all.
+      has_cash_drawer: match.has_cash_drawer,
+      drawer_pin: match.drawer_pin,
+      drawer_pulse_on_ms: match.drawer_pulse_on_ms,
+      drawer_pulse_off_ms: match.drawer_pulse_off_ms,
     };
   });
   const extra = configPrinters.filter((c) => !used.has(c.id) && !mirrored.some((m) => m.id === c.id));

@@ -7,6 +7,7 @@ import { startBridgeServer, setAppVersion } from "./bridge-server";
 import { startPolling } from "./polling";
 import { loadConfig, saveConfig } from "./config";
 import { deliverToPrinter } from "./deliver";
+import { buildDrawerKick } from "./print/drawer";
 import { recordResult, getHealthSnapshot } from "./health";
 import { listSystemPrinters } from "./system-printer";
 import { buildLabelTest } from "./render/label-test";
@@ -491,6 +492,45 @@ ipcMain.handle("printer:test", async (_, idx: number) => {
     return { ok: false, error: (e as Error).message };
   }
 });
+
+/**
+ * Test the cash drawer — send ONLY the kick, nothing printed.
+ *
+ * Takes an explicit `pin` so the settings window can offer "Open with Pin 2"
+ * and "Open with Pin 5" side by side. That is the whole point: roughly one
+ * drawer in five is wired to pin 5 and never opens on pin 2, and an operator
+ * has no way to know which they have. Pressing both and seeing which one opens
+ * discovers the answer in five seconds, without anyone needing to know what a
+ * pin is.
+ *
+ * This never touches the server. It goes straight down the same transport the
+ * printer already uses, so it works offline, and it works before this printer
+ * has ever been paired to Dine.
+ */
+ipcMain.handle(
+  "printer:test-drawer",
+  async (_, args: { idx: number; pin?: 2 | 5; pulseOnMs?: number }) => {
+    const config = loadConfig();
+    const printer = config.printers[args?.idx ?? -1];
+    if (!printer) return { ok: false, error: "Printer not found" };
+
+    // Deliberately NOT gated on `hasCashDrawer`. The operator is testing in
+    // order to decide what that setting should be, so refusing until it is
+    // already on would be a door locked from the inside.
+    const bytes = buildDrawerKick(
+      args?.pin === 5 ? 5 : 2,
+      args?.pulseOnMs ?? printer.drawerPulseOnMs ?? 100,
+      printer.drawerPulseOffMs ?? 240
+    );
+
+    try {
+      await deliverToPrinter(printer, bytes);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  }
+);
 
 app.whenReady().then(() => {
   setAppVersion(app.getVersion());

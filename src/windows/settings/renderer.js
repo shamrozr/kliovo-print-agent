@@ -261,6 +261,116 @@ function buildPrinterCard(printer, index) {
         : "background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;");
   });
 
+  // ── Cash drawer ──────────────────────────────────────────────────────
+  // A drawer is a box on THIS printer's DK port, so it is configured here
+  // rather than in Dine: only the machine next to it knows how it is wired.
+  // Same reason host/port live here. Dine keeps a reported copy for support.
+  const drawerWrap = document.createElement("div");
+  drawerWrap.style.cssText = "margin-top:14px;padding-top:12px;border-top:1px solid #e5e7eb;";
+
+  const drawerToggleLabel = document.createElement("label");
+  drawerToggleLabel.style.cssText = "display:flex;align-items:center;gap:8px;cursor:pointer;";
+  const drawerToggle = document.createElement("input");
+  drawerToggle.type = "checkbox";
+  drawerToggle.style.cssText = "width:16px;height:16px;margin:0;";
+  drawerToggle.checked = !!printer.hasCashDrawer;
+  const drawerToggleText = document.createElement("span");
+  setText(drawerToggleText, "Cash drawer connected to this printer");
+  drawerToggleLabel.append(drawerToggle, drawerToggleText);
+
+  const drawerFields = document.createElement("div");
+  drawerFields.style.display = printer.hasCashDrawer ? "block" : "none";
+
+  const pinLabel = document.createElement("label");
+  setText(pinLabel, "Drawer Pin");
+  const pinSelect = document.createElement("select");
+  pinSelect.style.cssText = SELECT_CSS;
+  const currentPin = Number(printer.drawerPin) === 5 ? "5" : "2";
+  [["Pin 2 (most drawers)", "2"], ["Pin 5", "5"]].forEach(function(opt) {
+    const o = document.createElement("option");
+    o.value = opt[1];
+    setText(o, opt[0]);
+    if (currentPin === opt[1]) o.selected = true;
+    pinSelect.appendChild(o);
+  });
+  pinSelect.addEventListener("change", function() {
+    cfg.printers[index].drawerPin = Number(pinSelect.value) === 5 ? 5 : 2;
+  });
+
+  const pulseLabel = document.createElement("label");
+  setText(pulseLabel, "Pulse Length");
+  const pulseSelect = document.createElement("select");
+  pulseSelect.style.cssText = SELECT_CSS;
+  const currentPulse = String(printer.drawerPulseOnMs || 100);
+  [["100 ms (default)", "100"], ["200 ms", "200"], ["300 ms", "300"]].forEach(function(opt) {
+    const o = document.createElement("option");
+    o.value = opt[1];
+    setText(o, opt[0]);
+    if (currentPulse === opt[1]) o.selected = true;
+    pulseSelect.appendChild(o);
+  });
+  pulseSelect.addEventListener("change", function() {
+    cfg.printers[index].drawerPulseOnMs = Number(pulseSelect.value);
+  });
+
+  const pulseHint = document.createElement("div");
+  pulseHint.className = "status";
+  setText(pulseHint, "If the drawer clicks but does not open, increase this.");
+
+  // Two buttons, not one. Roughly one drawer in five is wired to pin 5 and
+  // never opens on pin 2, and an operator has no way to know which they have.
+  // Pressing both and seeing which one opens answers it in five seconds
+  // without anyone needing to know what a pin is.
+  const drawerActions = document.createElement("div");
+  drawerActions.className = "actions";
+  const pin2Btn = document.createElement("button");
+  pin2Btn.className = "ghost";
+  setText(pin2Btn, "Open with Pin 2");
+  const pin5Btn = document.createElement("button");
+  pin5Btn.className = "ghost";
+  setText(pin5Btn, "Open with Pin 5");
+  drawerActions.append(pin2Btn, pin5Btn);
+
+  const drawerStatus = document.createElement("div");
+  drawerStatus.className = "status";
+
+  function testDrawer(pin) {
+    drawerStatus.className = "status";
+    setText(drawerStatus, "Opening…");
+    window.agent.testDrawer({
+      idx: index,
+      pin: pin,
+      pulseOnMs: Number(pulseSelect.value) || 100
+    }).then(function(r) {
+      drawerStatus.className = r.ok ? "status ok" : "status err";
+      setText(
+        drawerStatus,
+        r.ok
+          ? "Sent on pin " + pin + " — if the drawer opened, set Drawer Pin to " + pin + "."
+          : (r.error || "Failed")
+      );
+    }).catch(function(e) {
+      drawerStatus.className = "status err";
+      setText(drawerStatus, e.message);
+    });
+  }
+  pin2Btn.addEventListener("click", function() { testDrawer(2); });
+  pin5Btn.addEventListener("click", function() { testDrawer(5); });
+
+  drawerFields.append(pinLabel, pinSelect, pulseLabel, pulseSelect, pulseHint, drawerActions, drawerStatus);
+
+  drawerToggle.addEventListener("change", function() {
+    cfg.printers[index].hasCashDrawer = drawerToggle.checked;
+    if (drawerToggle.checked) {
+      if (!cfg.printers[index].drawerPin) cfg.printers[index].drawerPin = 2;
+      if (!cfg.printers[index].drawerPulseOnMs) cfg.printers[index].drawerPulseOnMs = 100;
+      if (!cfg.printers[index].drawerPulseOffMs) cfg.printers[index].drawerPulseOffMs = 240;
+    }
+    drawerFields.style.display = drawerToggle.checked ? "block" : "none";
+  });
+
+  drawerWrap.append(drawerToggleLabel, drawerFields);
+
   const actions = document.createElement("div");
   actions.className = "actions";
   const testBtn = document.createElement("button");
@@ -276,7 +386,7 @@ function buildPrinterCard(printer, index) {
   st.id = "st" + index;
 
   const connectionFields = connType === "system" ? sysWrap : row;
-  card.append(header, nameLabel, nameInput, connLabel, connSelect, connectionFields, pidLabel, pidInput, keyLabel, keyInput, widthLabel, widthSelect, modeLabel, modeSelect, labelWrap, actions, st);
+  card.append(header, nameLabel, nameInput, connLabel, connSelect, connectionFields, pidLabel, pidInput, keyLabel, keyInput, widthLabel, widthSelect, modeLabel, modeSelect, labelWrap, drawerWrap, actions, st);
 
   card.querySelectorAll("input[data-field]").forEach(function(input) {
     input.addEventListener("input", function() {

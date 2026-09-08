@@ -72,6 +72,11 @@ function getConfigPrinters(): MirroredPrinter[] {
       printer_mode: p.printerMode,
       is_default: 0,
       is_active: 1,
+      // Agent-local hardware facts; the mirror has no opinion on these.
+      has_cash_drawer: p.hasCashDrawer ? 1 : 0,
+      drawer_pin: p.drawerPin,
+      drawer_pulse_on_ms: p.drawerPulseOnMs,
+      drawer_pulse_off_ms: p.drawerPulseOffMs,
     }));
   } catch {
     return [];

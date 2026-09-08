@@ -1,5 +1,6 @@
 import { app } from "electron";
 import { loadConfig, PrinterEntry } from "./config";
+import { drawerHeaders, drawerFingerprint, withDrawerKick } from "./print/drawer";
 import { deliverToPrinter } from "./deliver";
 import { recordResult } from "./health";
 import { logger } from "./logger";
@@ -72,6 +73,18 @@ export function msSinceLastPrint(): number {
 function dedupHeader(): Record<string, string> {
   return isLedgerReady() ? { "X-Agent-Dedup": "1" } : {};
 }
+
+/**
+ * Last drawer fingerprint we successfully reported, per printer.
+ *
+ * The config header rides the poll ONLY when this changes. `/api/print/pending`
+ * is the highest-volume route on the platform, so a value sent on every poll
+ * would put a database write on every poll for every printer, forever — the
+ * shape of the Aug 5-7 2026 outage. Held in memory rather than persisted on
+ * purpose: an agent restart re-reports once, which is a cheap way to heal a
+ * report that was lost to a 500 or a network blip.
+ */
+const reportedDrawer = new Map<string, string>();
 
 /** ACK a printed job. Returns true only when the server confirms. */
 async function ackJob(
@@ -175,6 +188,10 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
       // Opt into the server-side long-poll hold (see EXTENDED_WAIT_SECONDS).
       "X-Agent-Wait": String(EXTENDED_WAIT_SECONDS),
       ...dedupHeader(),
+      // Tells the server this agent emits its own drawer kick from the
+      // operator-verified pin/pulse below, so the server must NOT prepend one
+      // of its own. Exactly one side emits.
+      ...drawerHeaders(printer, reportedDrawer.get(printer.printerId) !== drawerFingerprint(printer)),
     },
     signal:  AbortSignal.timeout(POLL_FETCH_TIMEOUT_MS),
   });
@@ -187,9 +204,17 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
     return;
   }
 
-  const { printJobId, bytesBase64 } = (await res.json()) as {
+  // The config header (if we sent one) reached the server with this request.
+  // Record it only on a response we actually got back, so a dropped request
+  // is retried rather than silently considered reported.
+  reportedDrawer.set(printer.printerId, drawerFingerprint(printer));
+
+  const { printJobId, bytesBase64, openDrawer } = (await res.json()) as {
     printJobId:  string;
     bytesBase64: string;
+    /** Cash changed hands — kick the drawer as this job goes out. Absent on
+     *  older servers, which prepend the kick to the bytes themselves. */
+    openDrawer?: boolean;
   };
 
   logger.info(`[poll] received job ${printJobId} for ${printer.printerId}`);
@@ -202,7 +227,14 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
     return;
   }
 
-  const bytes = Buffer.from(bytesBase64, "base64");
+  // Prepended, never appended: the drawer opens while the paper is still
+  // feeding, and a printer that jams halfway has already opened it. Returns
+  // the bytes untouched when this printer has no drawer configured, so a
+  // mis-set flag can never fire a solenoid pin on a kitchen printer.
+  const bytes = withDrawerKick(
+    Buffer.from(bytesBase64, "base64"),
+    openDrawer ? printer : {}
+  );
   lastPrintAt = Date.now();
   try {
     await deliverToPrinter(printer, bytes);

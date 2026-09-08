@@ -39,6 +39,25 @@ export interface PrinterEntry {
    * Ignored when printerMode !== "label".
    */
   labelLanguage?: "tspl" | "zpl" | "epl";
+
+  // ── Cash drawer ──────────────────────────────────────────────────────
+  // A drawer is a box on THIS printer's DK port, so its wiring is a local,
+  // physical, operator-verified fact — the same category as host/port above,
+  // and held here for the same reason (see print/router.ts on why the
+  // web-mirrored copy is not trusted). Dine holds a REPORTED copy for support
+  // visibility only; it is never authoritative.
+  /** Is a drawer actually plugged into this printer? Off = never kicked. */
+  hasCashDrawer?: boolean;
+  /** Connector pin the drawer is wired to. ~1 in 5 drawers is pin 5, and a
+   *  pin-5 drawer never opens on pin 2 however correct everything else is —
+   *  which is why the settings window offers a test for each. */
+  drawerPin?: 2 | 5;
+  /** Solenoid ON time. A stiff 24V drawer often needs 200-300ms; at 100ms it
+   *  clicks without throwing the latch. This is the "sometimes it opens"
+   *  complaint, and it is the first thing to raise. */
+  drawerPulseOnMs?: number;
+  /** Wait after the pulse before the printer accepts more data. */
+  drawerPulseOffMs?: number;
 }
 
 export interface AgentConfig {

@@ -8,12 +8,13 @@ import { deliverToPrinter } from "../deliver";
 import { hasPrinted, markPrinted } from "../store/print-ledger";
 import { recordResult, recordFallbackRoute } from "../health";
 import { logger } from "../logger";
-import { resolveKotTargets, resolveReceiptTarget, type ResolvedTarget } from "./router";
+import { resolveKotTargets, resolveReceiptTarget, toPrinterEntry, type ResolvedTarget } from "./router";
 import { buildKotInput, buildReceiptInput, kotJobId, receiptJobId } from "./render-map";
 import type { ItemRow as pr_ItemRow } from "./render-map";
 import { loadReceiptLogo } from "./logo";
 import * as pr from "../store/print-repo";
 import { isKotSuppressed, stationsOnLine } from "../store/kot-plan";
+import { kickFor, tenderOpensDrawer, withDrawerKick } from "./drawer";
 
 /** Shared receipt options: mirrored designer template + locally-loaded logo. */
 function receiptExtras(paperWidth: 80 | 58) {
@@ -180,6 +181,39 @@ export async function fireOnAddItem(orderId: string, addedItemId?: string): Prom
   }
 }
 
+/**
+ * Open the drawer with nothing printed.
+ *
+ * Used when the cash sale produced no receipt, or when the receipt went to a
+ * printer that has no drawer. Deliberately NOT routed through `deliverOnce`:
+ * that consults the printed-jobs dedup ledger, and a drawer open is not a
+ * ticket — a cashier may legitimately need it twice in a minute, and it has
+ * no paper to duplicate.
+ *
+ * Opens exactly one drawer. If a branch has two tills with two drawers and
+ * the receipt could not tell us which, none is opened: a drawer popping next
+ * to the wrong cashier is worse than one that did not pop, and it is the kind
+ * of thing nobody reports until money is missing.
+ */
+async function openDrawerOnly(
+  printers: ReturnType<typeof pr.getResolvablePrinters>,
+  orderId: string
+): Promise<void> {
+  const withDrawer = printers.map(toPrinterEntry).filter((p) => p.hasCashDrawer);
+  if (withDrawer.length !== 1) {
+    logger.warn(
+      `[fire] order ${orderId}: cash sale but ${withDrawer.length} printers have a drawer — not opening`
+    );
+    return;
+  }
+  try {
+    await deliverToPrinter(withDrawer[0], kickFor(withDrawer[0]));
+    logger.info(`[fire] order ${orderId}: opened drawer on ${withDrawer[0].name}`);
+  } catch (e) {
+    logger.error(`[fire] order ${orderId}: drawer open failed: ${(e as Error).message}`);
+  }
+}
+
 export async function fireReceipt(orderId: string, paymentId: string): Promise<void> {
   try {
     const order = pr.getOrderRow(orderId);
@@ -187,19 +221,41 @@ export async function fireReceipt(orderId: string, paymentId: string): Promise<v
     const printers = pr.getResolvablePrinters();
     const routes = pr.getEffectiveRoutes();
     const target = resolveReceiptTarget(printers, routes, order.source || "dine_in");
+    const pay = pr.getPayment(orderId, paymentId);
+    // Cash moved, so the drawer opens — offline exactly as online. The tender
+    // rule is a deliberate, bounded copy of Dine's (see print/drawer.ts): the
+    // agent settles payments with no server involved during an outage, so it
+    // cannot ask. Keep it at "does the tender include cash" so the two cannot
+    // drift.
+    const opensDrawer = tenderOpensDrawer([pay?.method]);
+
     if (!target) {
       logger.error(`[fire] order ${orderId}: NO active printers — cannot print receipt`);
+      // No receipt is not a reason to leave the drawer shut on a cash sale.
+      // The drawer opening is the response to cash changing hands, not a side
+      // effect of printing — the same reason the cloud falls back to a
+      // drawer-only job when Print Control has the settle receipt switched off.
+      if (opensDrawer) await openDrawerOnly(printers, orderId);
       return;
     }
     const items = pr.getOrderItems(orderId);
-    const pay = pr.getPayment(orderId, paymentId);
     const payments = pay ? [{ method: pay.method, amount: pay.amount, tip: pay.tip }] : [];
     const branding = pr.getBranding();
     const { time, date } = fmtTime(Date.now());
     const tableName = pr.getTableName(order.table_id ?? undefined);
     const input = buildReceiptInput(order, items, payments, branding, time, date, tableName, receiptExtras(target.printer.paperWidth));
-    const bytes = renderJob({ kind: "receipt", input }, renderContextFromPrinter(target.printer));
+    // Prepended, never appended — the drawer opens while the paper is still
+    // feeding, and a jam halfway through has already opened it. Returns the
+    // bytes untouched when this printer has no drawer configured.
+    const bytes = withDrawerKick(
+      renderJob({ kind: "receipt", input }, renderContextFromPrinter(target.printer)),
+      opensDrawer ? target.printer : {}
+    );
     await deliverOnce(receiptJobId(orderId, paymentId), target, bytes, `receipt ${orderId}`);
+    // The receipt printer may not be the one with the drawer (a branch whose
+    // receipts go to a second printer). Fall back rather than silently not
+    // opening.
+    if (opensDrawer && !target.printer.hasCashDrawer) await openDrawerOnly(printers, orderId);
   } catch (e) {
     logger.error(`[fire] fireReceipt ${orderId}: ${(e as Error).message}`);
   }
