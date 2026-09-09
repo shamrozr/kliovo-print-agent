@@ -9,6 +9,7 @@
  *   Windows — PowerShell P/Invokes winspool.drv (OpenPrinter →
  *             StartDocPrinter "RAW" → WritePrinter). Reuses the driver the
  *             user installed when they plugged the printer in. Offline-safe.
+ *             Checks the queue's port before writing — see BAD_PORT_CHECK_PS1.
  *   macOS   — `lp -d <queue> -o raw` (CUPS).
  *   Linux   — `lp -d <queue> -o raw` (CUPS).
  */
@@ -23,9 +24,34 @@ const SPOOL_TIMEOUT_MS = 15_000;
 // disk) a cold PowerShell start alone can eat 10-15s before it runs anything.
 const ENUM_TIMEOUT_MS = 30_000;
 
+/**
+ * Windows silently redirects a raw print job to disk when a queue's port has
+ * been reassigned to a file path instead of the printer's real USB/local port
+ * (a "Local Port" pointing at e.g. C:\...\Documents\<queue name>, or the
+ * literal FILE: port) — WritePrinter still reports success, so nothing here
+ * ever sees a failure; the operator just finds a growing pile of files named
+ * after the printer in Documents. This is what a Bixolon queue does whenever
+ * its USB connection is re-enumerated on a new port and the driver doesn't
+ * re-bind cleanly. Refuse BEFORE writing instead of silently saving another
+ * file, so it fails loudly and the operator has something actionable.
+ */
+const BAD_PORT_CHECK_PS1 = `
+try {
+  $p = Get-Printer -Name $PrinterName -ErrorAction Stop
+  if ($p.PortName -match '^[A-Za-z]:\\\\' -or $p.PortName -eq 'FILE:') {
+    Write-Error "Printer '$PrinterName' is set to save to a file instead of printing (port='$($p.PortName)'). Open Windows Settings > Printers & scanners > $PrinterName > Printer properties > Ports, and point it back at the printer's real USB port, then try again." -ErrorAction Stop
+  }
+} catch {
+  if ($_.Exception.Message -like "*save to a file instead*") { throw }
+  # Get-Printer itself unavailable/broken (old Windows, WMI hiccup) — this is a
+  # diagnostic, not the primary path; do not block printing on it failing.
+}
+`;
+
 /** C# RawPrinterHelper compiled in-process by PowerShell via Add-Type. */
 const RAW_PRINT_PS1 = `param([Parameter(Mandatory=$true)][string]$PrinterName,[Parameter(Mandatory=$true)][string]$FilePath)
 $ErrorActionPreference = "Stop"
+${BAD_PORT_CHECK_PS1}
 $code = @'
 using System;
 using System.IO;

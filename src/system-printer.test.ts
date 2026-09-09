@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-type Handler = (cmd: string, args: string[]) => { err?: Error; stdout?: string };
+type Handler = (cmd: string, args: string[]) => { err?: Error; stdout?: string; stderr?: string };
 
 let handler: Handler = () => ({ stdout: "" });
 const calls: Array<{ cmd: string; args: string[] }> = [];
@@ -17,7 +17,7 @@ vi.mock("child_process", () => ({
   execFile: (cmd: string, args: string[], _opts: unknown, cb: Function) => {
     calls.push({ cmd, args });
     const r = handler(cmd, args);
-    setImmediate(() => cb(r.err ?? null, r.stdout ?? "", ""));
+    setImmediate(() => cb(r.err ?? null, r.stdout ?? "", r.stderr ?? ""));
   },
 }));
 
@@ -89,6 +89,38 @@ describe("listSystemPrinters — windows", () => {
     const { listSystemPrinters } = await freshModule();
 
     expect(await listSystemPrinters()).toEqual([]);
+  });
+});
+
+describe("sendRawToSystemPrinter — windows", () => {
+  beforeEach(() => setPlatform("win32"));
+
+  it("embeds the bad-port guard in the script it writes to disk", async () => {
+    const fs = await import("fs");
+    handler = () => ({ stdout: "" });
+    const { sendRawToSystemPrinter } = await freshModule();
+
+    await sendRawToSystemPrinter("XP-58", Buffer.from("hi"));
+
+    const scriptPath = calls[0].args[calls[0].args.indexOf("-File") + 1];
+    const written = fs.readFileSync(scriptPath, "utf-8");
+    expect(written).toContain("Get-Printer -Name $PrinterName");
+    expect(written).toContain("save to a file instead of printing");
+  });
+
+  it("surfaces the bad-port message when the spooler refuses to print", async () => {
+    // execFile's err path prefers stderr — simulate PowerShell's
+    // Write-Error -ErrorAction Stop (the bad-port guard) landing on stderr.
+    handler = () => ({
+      err: new Error("command failed"),
+      stderr:
+        "Printer 'XP-58' is set to save to a file instead of printing (port='C:\\Users\\till\\Documents').",
+    });
+    const { sendRawToSystemPrinter } = await freshModule();
+
+    await expect(sendRawToSystemPrinter("XP-58", Buffer.from("hi"))).rejects.toThrow(
+      /set to save to a file instead of printing/
+    );
   });
 });
 
