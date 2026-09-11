@@ -104,6 +104,15 @@ export interface AgentConfig {
    */
   lanAccess?: boolean;
 
+  /**
+   * How long to keep retrying a NETWORK printer that does not answer before
+   * giving the ticket back to the server as failed (ms). 0 = off (NACK after
+   * the three quick attempts, the pre-2.13 behaviour). Default 60s; ceiling
+   * 5min — the server fails a silent job at 20min regardless. The server's
+   * per-tenant value, when set by super admin, overrides this. See print-hold.ts.
+   */
+  printHoldMs?: number;
+
   /** Push continued-order op-deltas to the server merge endpoint. OFF until the
    *  server route is deployed (emitting ops a server can't merge would 4xx). */
   pushContinuedOps?: boolean;

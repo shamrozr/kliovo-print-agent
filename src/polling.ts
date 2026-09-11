@@ -2,6 +2,8 @@ import { app } from "electron";
 import { loadConfig, PrinterEntry } from "./config";
 import { drawerHeaders, drawerFingerprint, withDrawerKick } from "./print/drawer";
 import { deliverToPrinter } from "./deliver";
+import { sendRawToPrinter, RetryableSendError } from "./tcp-sender";
+import { PrintHold, DEFAULT_HOLD_MS, MAX_HOLD_MS, type HeldJob } from "./print-hold";
 import { recordResult } from "./health";
 import { logger } from "./logger";
 import {
@@ -58,6 +60,67 @@ function readPollHint(printerId: string, res: Response): void {
 let lastPrintAt = 0;
 export function msSinceLastPrint(): number {
   return lastPrintAt === 0 ? Number.MAX_SAFE_INTEGER : Date.now() - lastPrintAt;
+}
+
+/**
+ * Unreachable-printer hold (see print-hold.ts). Resolution of the window, in
+ * order: the server's per-tenant value carried on the job payload
+ * (`printHoldMs`, set by super admin so support can tune a branch remotely),
+ * then this machine's Settings value, then the default. 0 = off (the pre-2.13
+ * behaviour: NACK after the three quick attempts).
+ */
+const serverHoldHint = new Map<string, number>();
+
+function readHoldHint(printerId: string, raw: unknown): void {
+  if (raw === undefined) return; // old server: keep whatever we had
+  if (raw === null) {
+    serverHoldHint.delete(printerId); // server says "agent decides"
+    return;
+  }
+  const ms = Number(raw);
+  if (!Number.isFinite(ms)) return;
+  serverHoldHint.set(printerId, Math.min(Math.max(ms, 0), MAX_HOLD_MS));
+}
+
+export function resolveHoldMs(printerId: string, configHoldMs: number | undefined): number {
+  const fromServer = serverHoldHint.get(printerId);
+  if (fromServer !== undefined) return fromServer;
+  if (typeof configHoldMs === "number" && Number.isFinite(configHoldMs)) {
+    return Math.min(Math.max(configHoldMs, 0), MAX_HOLD_MS);
+  }
+  return DEFAULT_HOLD_MS;
+}
+
+interface HoldCtx {
+  serverUrl: string;
+  printer: PrinterEntry;
+}
+
+const hold = new PrintHold<HoldCtx>({
+  now: () => Date.now(),
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: (h) => clearTimeout(h as NodeJS.Timeout),
+  // ONE attempt per tick — the hold's own backoff paces it. Network printers
+  // only: a spooler failure is not a network blip, and deliverToPrinter's
+  // quick triple already ran before the job got here.
+  deliver: (job) => sendRawToPrinter(job.ctx.printer.host, job.ctx.printer.port || 9100, job.bytes),
+  onPrinted: (job) => {
+    lastPrintAt = Date.now();
+    markPrinted(job.printJobId, job.ctx.printer.printerId, job.ctx.printer.agentKey);
+    recordResult({ printerId: job.ctx.printer.printerId, printerName: job.ctx.printer.name, kind: "queued", ok: true });
+    void ackJob(job.ctx.serverUrl, job.printJobId, job.ctx.printer.agentKey);
+  },
+  onGiveUp: (job, reason) => {
+    recordResult({ printerId: job.ctx.printer.printerId, printerName: job.ctx.printer.name, kind: "queued", ok: false, error: reason });
+    void nackJob(job.ctx.serverUrl, job.printJobId, job.ctx.printer.agentKey, reason);
+  },
+  isRetryable: (err) => err instanceof RetryableSendError,
+  log: (msg) => logger.info(msg),
+});
+
+/** For the settings window / health: is anything being held right now? */
+export function heldCount(printerId: string): number {
+  return hold.size(printerId);
 }
 
 /**
@@ -209,13 +272,24 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
   // is retried rather than silently considered reported.
   reportedDrawer.set(printer.printerId, drawerFingerprint(printer));
 
-  const { printJobId, bytesBase64, openDrawer } = (await res.json()) as {
+  const { printJobId, bytesBase64, openDrawer, printHoldMs } = (await res.json()) as {
     printJobId:  string;
     bytesBase64: string;
     /** Cash changed hands — kick the drawer as this job goes out. Absent on
      *  older servers, which prepend the kick to the bytes themselves. */
     openDrawer?: boolean;
+    /** Tenant's unreachable-printer hold window; null = agent decides. Absent on older servers. */
+    printHoldMs?: number | null;
   };
+  readHoldHint(printer.printerId, printHoldMs);
+
+  // Redelivery of something we are still retrying locally (the server's
+  // bounded reclaim re-serves an un-ACKed job after its grace). Printing this
+  // copy too would double the ticket the moment the printer answers.
+  if (hold.isHeld(printJobId)) {
+    logger.info(`[poll] job ${printJobId} is held locally — redelivery ignored`);
+    return;
+  }
 
   logger.info(`[poll] received job ${printJobId} for ${printer.printerId}`);
 
@@ -235,15 +309,40 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
     Buffer.from(bytesBase64, "base64"),
     openDrawer ? printer : {}
   );
+  const holdMs = printer.connection === "system" ? 0 : resolveHoldMs(printer.printerId, loadConfig().printHoldMs);
+
+  // The printer is already being retried locally: join the back of its queue
+  // so tickets stay in order, rather than burning 7s of connect attempts on a
+  // printer we already know is not answering.
+  if (holdMs > 0 && hold.has(printer.printerId)) {
+    const joined = hold.enqueue({
+      printerId: printer.printerId, printJobId, bytes, holdMs,
+      error: "printer still unreachable (joined hold queue)",
+      ctx: { serverUrl, printer },
+    });
+    if (joined) return;
+    // Queue full — fall through and let the normal attempt/NACK path decide.
+  }
+
   lastPrintAt = Date.now();
   try {
     await deliverToPrinter(printer, bytes);
   } catch (e) {
+    const msg = (e as Error).message;
+    // A PRE-CONNECT failure on a network printer is a blip until proven
+    // otherwise: hold the bytes here and keep trying without the server.
+    // Anything else (post-connect, spooler, hold off) is NACKed as before.
+    if (holdMs > 0 && e instanceof RetryableSendError) {
+      const held = hold.enqueue({
+        printerId: printer.printerId, printJobId, bytes, holdMs, error: msg,
+        ctx: { serverUrl, printer },
+      });
+      if (held) return;
+    }
     // Do NOT rethrow: an uncleared "printing" job on the server is reclaimed
     // as the OLDEST job on every subsequent poll, so it would head-of-line
     // block every newer ticket to this printer for as long as it's down.
     // NACKing fails the job server-side and frees the printer to move on.
-    const msg = (e as Error).message;
     recordResult({ printerId: printer.printerId, printerName: printer.name, kind: "queued", ok: false, error: msg });
     await nackJob(serverUrl, printJobId, printer.agentKey, msg);
     logger.warn(`[poll] delivery failed for ${printJobId} on ${printer.printerId}: ${msg} — nacked (parked)`);

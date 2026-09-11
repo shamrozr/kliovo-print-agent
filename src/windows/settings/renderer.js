@@ -452,6 +452,7 @@ function init() {
     document.getElementById("offlineDeviceKey").value = c.offlineDeviceKey || "";
     document.getElementById("taxRelayKey").value = c.taxRelayKey || "";
     renderLanAccess();
+    renderPrintHold();
     renderPrinters();
   });
 }
@@ -694,6 +695,31 @@ function renderLanAccess() {
 document.getElementById("lanAccess").addEventListener("change", function() {
   cfg.lanAccess = document.getElementById("lanAccess").checked;
   window.agent.saveConfig(cfg).then(renderLanAccess).catch(function() {});
+});
+
+// ── Unreachable-printer hold ───────────────────────────────────
+// A Wi-Fi blip used to cost a ticket: three connect attempts (~7s), NACK,
+// parked on the server until someone pressed Reprint. The bytes are on this
+// machine, so the agent now keeps trying by itself for this long before
+// giving the ticket back. Network printers only. The server's per-tenant
+// value (super admin) overrides this when set.
+function renderPrintHold() {
+  var sel = document.getElementById("printHold");
+  var hint = document.getElementById("printHoldHint");
+  if (!sel) return;
+  var ms = typeof cfg.printHoldMs === "number" ? cfg.printHoldMs : 60000;
+  var known = ["0", "30000", "60000", "120000", "300000"];
+  sel.value = known.indexOf(String(ms)) >= 0 ? String(ms) : "60000";
+  setText(
+    hint,
+    ms === 0
+      ? "Off. A printer that does not answer fails the ticket after three quick attempts; the counter sees it in the failed-print alert."
+      : "Tickets for a printer that stops answering wait here and are retried in order until it comes back. If it is still silent after this long, the ticket goes to the failed-print alert on the counter with a Reprint button. Prints already handed to a printer are never re-sent."
+  );
+}
+document.getElementById("printHold").addEventListener("change", function() {
+  cfg.printHoldMs = Number(document.getElementById("printHold").value);
+  window.agent.saveConfig(cfg).then(renderPrintHold).catch(function() {});
 });
 
 // ── Device Key — save + verify ─────────────────────────────────

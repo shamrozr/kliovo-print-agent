@@ -256,6 +256,22 @@
       <div class="status" id="lanAccessHint" style="margin-top:8px;color:#64748b;"></div>
     </div>
 
+    <!-- Unreachable-printer hold -->
+    <div class="section">When a network printer does not answer</div>
+    <div class="card">
+      <div class="row" style="margin-top:0;align-items:center;gap:10px;">
+        <span style="flex:1;">Keep trying for</span>
+        <select id="printHold" style="width:auto;margin:0;">
+          <option value="0">Off (give up after 7 seconds)</option>
+          <option value="30000">30 seconds</option>
+          <option value="60000">1 minute (recommended)</option>
+          <option value="120000">2 minutes</option>
+          <option value="300000">5 minutes</option>
+        </select>
+      </div>
+      <div class="status" id="printHoldHint" style="margin-top:8px;color:#64748b;"></div>
+    </div>
+
     <!-- Sync Status -->
     <div id="syncBar" style="display:none"></div>
 
