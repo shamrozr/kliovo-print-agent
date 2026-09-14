@@ -229,6 +229,40 @@ async function nackJob(
   }
 }
 
+/**
+ * Tell the server this job is HELD — the printer did not answer and the agent
+ * is retrying it locally for `holdMs`. One request per job when it enters the
+ * hold queue, fire-and-forget, never retried: a lost report costs the counter
+ * a warning, never a ticket. The server keeps the job `printing` (ACK/NACK
+ * still settle it) and lights the failed-print alert amber NOW, instead of red
+ * when the hold expires. Before this (Belly Bro's, 2026-09-12) a 5-minute hold
+ * was five minutes of silence at the counter, during which the cashier pressed
+ * Print five more times and every copy joined the queue.
+ * Older servers answer 400 for the unknown action; that is logged and ignored.
+ */
+function reportHeld(
+  serverUrl: string,
+  printJobId: string,
+  agentKey: string,
+  error: string,
+  holdMs: number
+): void {
+  fetch(`${serverUrl}/api/print/${printJobId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${agentKey}`,
+      "X-Agent-Version": app.getVersion(),
+    },
+    body:   JSON.stringify({ action: "hold", error: error.slice(0, 500), holdMs }),
+    signal: AbortSignal.timeout(8_000),
+  })
+    .then((res) => {
+      if (!res.ok) logger.warn(`[poll] hold report ${printJobId} HTTP ${res.status}`);
+    })
+    .catch((e) => logger.warn(`[poll] hold report ${printJobId} failed: ${(e as Error).message}`));
+}
+
 /** Retry ACKs for jobs we printed but never got confirmation for. */
 async function flushPendingAcks(serverUrl: string): Promise<void> {
   const pending = pendingAcks();
@@ -315,12 +349,16 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
   // so tickets stay in order, rather than burning 7s of connect attempts on a
   // printer we already know is not answering.
   if (holdMs > 0 && hold.has(printer.printerId)) {
+    const joinedError = "printer still unreachable (joined hold queue)";
     const joined = hold.enqueue({
       printerId: printer.printerId, printJobId, bytes, holdMs,
-      error: "printer still unreachable (joined hold queue)",
+      error: joinedError,
       ctx: { serverUrl, printer },
     });
-    if (joined) return;
+    if (joined) {
+      reportHeld(serverUrl, printJobId, printer.agentKey, joinedError, holdMs);
+      return;
+    }
     // Queue full — fall through and let the normal attempt/NACK path decide.
   }
 
@@ -337,7 +375,10 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
         printerId: printer.printerId, printJobId, bytes, holdMs, error: msg,
         ctx: { serverUrl, printer },
       });
-      if (held) return;
+      if (held) {
+        reportHeld(serverUrl, printJobId, printer.agentKey, msg, holdMs);
+        return;
+      }
     }
     // Do NOT rethrow: an uncleared "printing" job on the server is reclaimed
     // as the OLDEST job on every subsequent poll, so it would head-of-line
