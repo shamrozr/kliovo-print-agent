@@ -1,8 +1,13 @@
 name: Build Windows 7 Legacy
 
-# No release publishing and no modern update metadata.
+# Publishing requires manual dispatch and an existing legacy draft release.
 on:
   workflow_dispatch:
+    inputs:
+      upload_to_draft:
+        description: Upload verified installers to their existing Win7 draft release
+        type: boolean
+        default: false
   push:
     branches: [codex/windows7-legacy-release]
 
@@ -39,3 +44,29 @@ jobs:
           name: kliovo-print-agent-win7-${{ matrix.arch }}
           path: release/win7/${{ matrix.arch }}/Kliovo-Print-Agent-Win7-*-Setup.exe
           if-no-files-found: error
+
+  upload-draft:
+    if: github.event_name == 'workflow_dispatch' && inputs.upload_to_draft
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kliovo-print-agent-win7-*
+          path: installers
+          merge-multiple: true
+      - name: Upload both verified installers to the legacy draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version=$(node -p "require('./legacy/win7/package.json').version")
+          tag="win7-v${version}"
+          draft=$(gh release view "$tag" --json isDraft --jq .isDraft)
+          test "$draft" = true
+          cd installers
+          sha256sum *-Setup.exe > SHA256SUMS.txt
+          gh release upload "$tag" *-Setup.exe SHA256SUMS.txt --clobber
