@@ -1,0 +1,3 @@
+# The native helper checksum must be identical on Windows and macOS checkouts.
+legacy/win7/native/rawprint.c text eol=lf
+legacy/win7/native/bin/**/*.exe binary
