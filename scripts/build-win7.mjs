@@ -67,6 +67,16 @@ export async function prepareBuild(arch) {
     await cp(path.join(LEGACY, entry), path.join(stage, entry));
   }
   const manifest = JSON.parse(await readFile(path.join(stage, "package.json"), "utf8"));
+  const helperMetadata = JSON.parse(await readFile(path.join(LEGACY, "native", "checksums.json"), "utf8"));
+  const helperSource = await readFile(path.join(LEGACY, "native", "rawprint.c"));
+  const helper = await readFile(path.join(LEGACY, "native", "bin", arch, "kliovo-rawprint.exe"));
+  if (createHash("sha256").update(helperSource).digest("hex") !== helperMetadata.sourceSha256 ||
+      createHash("sha256").update(helper).digest("hex") !== helperMetadata.binaries[arch]) {
+    throw new Error("Native print helper source/binary changed: rebuild with scripts/build-win7-native.mjs");
+  }
+  verifyWindowsBinary(helper, arch);
+  await mkdir(path.join(stage, "native"));
+  await writeFile(path.join(stage, "native", "kliovo-rawprint.exe"), helper);
   const modern = JSON.parse(await readFile(path.join(ROOT, "package.json"), "utf8"));
   // The independent manifest owns the legacy prerelease number; do not silently
   // rebuild stale application sources under another application's version.
@@ -101,6 +111,9 @@ export async function verifyPackage(output, stage, arch) {
   const unpacked = path.join(output, arch === "ia32" ? "win-ia32-unpacked" : "win-unpacked");
   verifyWindowsBinary(await readFile(path.join(unpacked, "Kliovo Print Agent Win7.exe")), arch);
   const resources = path.join(unpacked, "resources");
+  const printHelper = await readFile(path.join(resources, "kliovo-rawprint.exe"));
+  verifyWindowsBinary(printHelper, arch);
+  if (!printHelper.equals(await readFile(path.join(stage, "native", "kliovo-rawprint.exe")))) throw new Error("Packaged native printer helper differs");
   const asar = require("@electron/asar");
   const archive = path.join(resources, "app.asar");
   const metadata = JSON.parse(asar.extractFile(archive, "package.json").toString());
@@ -108,7 +121,7 @@ export async function verifyPackage(output, stage, arch) {
     throw new Error("Packaged app does not use the isolated Windows 7 entry point");
   }
   if (metadata.dependencies["better-sqlite3-multiple-ciphers"] !== SQLITE_VERSION) throw new Error("Unexpected packaged SQLite version");
-  for (const entry of ["legacy-main.cjs", "legacy-runtime.cjs", "dist/main.js", "dist/updater.js", "src/windows/settings/index.html", "src/windows/settings/renderer.js"]) {
+  for (const entry of ["legacy-main.cjs", "legacy-runtime.cjs", "dist/main.js", "dist/updater.js", "dist/system-printer.js", "src/windows/settings/index.html", "src/windows/settings/renderer.js"]) {
     if (!asar.extractFile(archive, entry).equals(await readFile(path.join(stage, entry)))) throw new Error(`Packaged file differs: ${entry}`);
   }
   const native = path.join("node_modules", "better-sqlite3-multiple-ciphers", "build", "Release", "better_sqlite3.node");

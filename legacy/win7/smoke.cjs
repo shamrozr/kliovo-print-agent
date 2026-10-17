@@ -98,6 +98,44 @@ async function main() {
     fs.rmSync(temp, { recursive: true, force: true });
   }
   console.log(`PASS: Electron ${process.versions.electron} ${process.arch}, encrypted SQLite, full schema, reopen and wrong-key rejection`);
+
+  // Compile and initialize the actual production PowerShell helper, without
+  // submitting a job or requiring an installed printer on the build runner.
+  const vm = require("vm");
+  const { execFile, execFileSync } = require("child_process");
+  const helper = path.join(path.dirname(process.execPath), "resources", "kliovo-rawprint.exe");
+  assert.equal(execFileSync(helper, ["--self-test"], { encoding: "utf8", windowsHide: true, timeout: 15000 }).trim(), `KLIOVO_RAWPRINT_READY:1:${process.arch}`);
+  console.log("PASS: direct native printer helper starts with matching architecture");
+  const spoolTest = fs.mkdtempSync(path.join(os.tmpdir(), "kliovo-native-smoke-"));
+  try {
+    const input = path.join(spoolTest, "test.bin");
+    fs.writeFileSync(input, "not sent to a printer");
+    const missingPrinter = `Kliovo-missing-${require("crypto").randomUUID()}`;
+    assert.throws(() => execFileSync(helper, [missingPrinter, input], { windowsHide: true, timeout: 15000, stdio: "pipe" }),
+      (error) => /OpenPrinter failed \(\d+\)/.test(error.stderr.toString()));
+  } finally {
+    fs.rmSync(spoolTest, { recursive: true, force: true });
+  }
+  console.log("PASS: native helper reaches the spooler and reports an invalid printer without printing");
+  const printerExports = {};
+  vm.runInNewContext(fs.readFileSync(path.join(stage, "dist", "system-printer.js"), "utf8"), {
+    exports: printerExports,
+    // Exercise the PowerShell fallback explicitly; normal legacy printing uses
+    // resources/kliovo-rawprint.exe and never launches PowerShell for a job.
+    process: { platform: "win32" }, Buffer, setTimeout,
+    require: (name) => {
+      if (name === "./logger") return { logger: console };
+      if (name === "child_process") return {
+        execFile: (command, args, options, callback) => {
+          assert.equal(command, "powershell.exe");
+          execFile(command, [...args, "-ValidateOnly"], options, callback);
+        },
+      };
+      return stageRequire(name);
+    },
+  });
+  await printerExports.sendRawToSystemPrinter("Kliovo validation only", Buffer.from("not submitted"));
+  console.log("PASS: Windows PowerShell printer helper compiles without submitting a print job");
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

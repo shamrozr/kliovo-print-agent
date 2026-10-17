@@ -1,0 +1,8 @@
+{
+  "compiler": "Zig 0.13.0 (freestanding C, no CRT)",
+  "sourceSha256": "239390c998b4b626a4fae76c7ccdc6c1b4eea9c743e791cf42812c365bf64bcf",
+  "binaries": {
+    "ia32": "f565242712108e69dc66c8421e7b5589ec08b7676eb5c8978389534707c87dcc",
+    "x64": "264742d8d4b3e2375b4de112dbaac86d055f090c81783fa8707b49fc18758091"
+  }
+}

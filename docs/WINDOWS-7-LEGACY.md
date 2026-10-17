@@ -2,17 +2,34 @@
 
 This target packages the current agent source for **Windows 7 SP1, 32-bit (ia32)
 and 64-bit (x64)** using Electron 22.3.27. It is a separate application called
-**Kliovo Print Agent Win7**, with version `2.14.0-win7.1` for the first build.
+**Kliovo Print Agent Win7**, with version `2.14.0-win7.2` for the current build.
 
 Electron 22 is the last Electron line supporting Windows 7 and is out of support.
 These installers require qualification on actual Windows 7 SP1 machines before
 deployment. Successful packaging or execution on a modern Windows build host
 does not establish Windows 7 printer/driver compatibility.
 
+## Changes in win7.2
+
+Windows 7 receipt delivery now uses a small native executable that calls the
+Windows print spooler directly. It does not start PowerShell or compile C# for
+each receipt. There is no deliberate waiting period: the 15-second native helper
+timeout is a failure limit, not a per-job delay. Actual printing speed still
+depends on the queue, driver and printer.
+
+The previous PowerShell path could hit its 15-second limit twice on slow machines
+and return an unexplained error after roughly 30 seconds. The fallback path now
+allows 60 seconds for cold startup/compilation, identifies the failed stage and
+reports the underlying error. An uncertain print timeout is not automatically
+retried. Only known transient failures before sending receipt bytes are retried.
+
+This addresses a likely cause identified from the reported timing; printing on
+the affected machine still needs to be confirmed.
+
 ## Installers
 
-- `release/win7/ia32/Kliovo-Print-Agent-Win7-2.14.0-win7.1-ia32-Setup.exe`
-- `release/win7/x64/Kliovo-Print-Agent-Win7-2.14.0-win7.1-x64-Setup.exe`
+- `release/win7/ia32/Kliovo-Print-Agent-Win7-2.14.0-win7.2-ia32-Setup.exe`
+- `release/win7/x64/Kliovo-Print-Agent-Win7-2.14.0-win7.2-x64-Setup.exe`
 
 Use ia32 for 32-bit Windows and x64 for 64-bit Windows. Install the printer's
 Windows 7 driver and confirm its Windows test page works before testing the
@@ -61,6 +78,20 @@ checksums, PE architecture, and the declared Windows OS/subsystem version are
 checked. Native rebuilding is disabled so modern build tools cannot silently
 replace this binary. Mainline dependencies and `pnpm-lock.yaml` are unchanged.
 
+The architecture-specific direct print helpers are checked in under
+`legacy/win7/native/bin`. Their source and binary checksums must match
+`legacy/win7/native/checksums.json` before packaging. They are freestanding C
+executables importing only Windows system DLLs (`KERNEL32`, `WINSPOOL`,
+`SHELL32`), with no C runtime, CLR, PowerShell or Zig runtime dependency. Rebuild
+both with Zig **0.13.0** on the development host:
+
+```sh
+node scripts/build-win7-native.mjs
+```
+
+Set `KLIOVO_ZIG` to a compiler path if Zig is not on PATH. No compiler is needed
+on the till or for ordinary installer builds using the checked-in helpers.
+
 The legacy manifest and its lockfile own the prerelease version. When mainline
 version changes, update the legacy version to `<mainline-version>-win7.<n>` and
 refresh the legacy lockfile explicitly:
@@ -75,8 +106,8 @@ are initialized before importing agent services.
 
 ## Windows workflow and checks
 
-Run **Build Windows 7 Legacy** manually from GitHub Actions after the changes
-are pushed. Its independent ia32/x64 jobs upload installer artifacts without
+**Build Windows 7 Legacy** runs on pushes to `codex/windows7-legacy-release` and
+also supports manual dispatch. Its independent ia32/x64 jobs upload installer artifacts without
 creating a GitHub release or touching the normal release workflow.
 
 The build verifies the packaged executable architecture, legacy entry point,
@@ -85,6 +116,8 @@ Windows build host, it also runs the packaged Electron executable in Node mode
 without opening any windows to exercise:
 
 - Electron version and native ABI.
+- The direct native printer helper starts with the expected architecture.
+- Production PowerShell helper compilation without submitting a print job.
 - HTTP authentication, request/response JSON, redirects, polling headers,
   timeout cancellation, and already-aborted requests.
 - Encrypted SQLite, creation of the full offline schema, persistence across

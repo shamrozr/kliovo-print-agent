@@ -17,6 +17,9 @@ files:
   - node_modules/**/*
 asarUnpack:
   - node_modules/better-sqlite3-multiple-ciphers/build/Release/*.node
+extraResources:
+  - from: native/kliovo-rawprint.exe
+    to: kliovo-rawprint.exe
 # build-win7.mjs installs checksum-pinned Electron ABI 110 Windows binaries.
 # Rebuilding on a modern host could introduce a newer Windows API requirement.
 npmRebuild: false

@@ -1,8 +1,10 @@
 name: Build Windows 7 Legacy
 
-# Deliberately manual: no release publishing and no modern update metadata.
+# No release publishing and no modern update metadata.
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/windows7-legacy-release]
 
 permissions:
   contents: read

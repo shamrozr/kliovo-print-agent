@@ -1,6 +1,6 @@
 {
   "name": "kliovo-print-agent-win7",
-  "version": "2.14.0-win7.1",
+  "version": "2.14.0-win7.2",
   "description": "Kliovo Print Agent for Windows 7 SP1 (legacy runtime)",
   "main": "legacy-main.cjs",
   "author": "Kliovo",
