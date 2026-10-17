@@ -1,0 +1,37 @@
+# Independent configuration: never inherit modern publishing or native rebuilds.
+extends: null
+appId: com.kliovo.print-agent.win7
+productName: Kliovo Print Agent Win7
+electronVersion: 22.3.27
+artifactName: Kliovo-Print-Agent-Win7-${version}-${arch}-Setup.${ext}
+directories:
+  buildResources: assets
+files:
+  - dist/**/*
+  - src/windows/settings/index.html
+  - src/windows/settings/renderer.js
+  - assets/**/*
+  - legacy-main.cjs
+  - legacy-runtime.cjs
+  - package.json
+  - node_modules/**/*
+asarUnpack:
+  - node_modules/better-sqlite3-multiple-ciphers/build/Release/*.node
+# build-win7.mjs installs checksum-pinned Electron ABI 110 Windows binaries.
+# Rebuilding on a modern host could introduce a newer Windows API requirement.
+npmRebuild: false
+nodeGypRebuild: false
+publish: null
+win:
+  # The build script selects ONE architecture per isolated dependency tree.
+  target: nsis
+  icon: assets/icon.ico
+  executableName: Kliovo Print Agent Win7
+nsis:
+  oneClick: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+  shortcutName: Kliovo Print Agent Win7
+  deleteAppDataOnUninstall: false

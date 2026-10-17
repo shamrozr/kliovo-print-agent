@@ -1,0 +1,19 @@
+{
+  "name": "kliovo-print-agent-win7",
+  "version": "2.14.0-win7.1",
+  "description": "Kliovo Print Agent for Windows 7 SP1 (legacy runtime)",
+  "main": "legacy-main.cjs",
+  "author": "Kliovo",
+  "license": "UNLICENSED",
+  "private": true,
+  "kliovoBuildTarget": "win7",
+  "dependencies": {
+    "bcryptjs": "3.0.3",
+    "better-sqlite3-multiple-ciphers": "9.5.0",
+    "electron-log": "5.1.7",
+    "electron-updater": "6.3.9",
+    "node-fetch": "2.7.0",
+    "pngjs": "7.0.0",
+    "zkteco-js": "1.7.2"
+  }
+}

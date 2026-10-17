@@ -14,6 +14,10 @@ import { logger } from "./logger";
 import { setPendingUpdate } from "./tray";
 import { loadConfig } from "./config";
 
+// Read the packaged manifest: the isolated Win7 build supplies this marker.
+// Never let a legacy runtime contact the modern fleet's update feed.
+const isLegacyBuild = require("../package.json").kliovoBuildTarget === "win7";
+
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // hourly check for a new download
 
 let pendingVersion: string | null = null;
@@ -25,6 +29,7 @@ export function getPendingUpdateVersion(): string | null {
 
 /** Install the downloaded update now. Only ever called from a user action. */
 export function installPendingUpdate(): void {
+  if (isLegacyBuild) return;
   if (!pendingVersion) return;
   logger.info(`[updater] user approved install of v${pendingVersion} — restarting`);
   // isSilent=false → the user sees the installer; isForceRunAfter=true → relaunch.
@@ -110,6 +115,10 @@ function checkNow(reason: string): void {
 }
 
 export function setupAutoUpdater(): void {
+  if (isLegacyBuild) {
+    logger.info("[updater] Windows 7 legacy build: updates require a legacy installer");
+    return;
+  }
   autoUpdater.logger = logger;
   autoUpdater.autoDownload = true;
   // Never install silently on quit — installation requires explicit user consent.

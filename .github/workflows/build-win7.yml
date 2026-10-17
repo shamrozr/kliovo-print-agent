@@ -1,0 +1,39 @@
+name: Build Windows 7 Legacy
+
+# Deliberately manual: no release publishing and no modern update metadata.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ia32, x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Install build tools without mainline native modules
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Check application tests
+        run: pnpm test
+      - name: Check legacy isolation
+        run: pnpm test:win7
+      - name: Package and smoke test Windows 7 installer
+        run: pnpm dist:win7 --arch=${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kliovo-print-agent-win7-${{ matrix.arch }}
+          path: release/win7/${{ matrix.arch }}/Kliovo-Print-Agent-Win7-*-Setup.exe
+          if-no-files-found: error

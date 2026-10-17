@@ -4,3 +4,5 @@ release/
 *.js.map
 .DS_Store
 package-lock.json
+!legacy/win7/package-lock.json
+.legacy-win7/

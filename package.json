@@ -12,9 +12,12 @@
     "postinstall": "electron-builder install-app-deps",
     "rebuild": "electron-rebuild -f -w better-sqlite3-multiple-ciphers",
     "dist:win": "npm run build && electron-builder --win",
+    "dist:win7": "npm run build && node scripts/build-win7.mjs",
+    "prepare:win7": "npm run build && node scripts/build-win7.mjs --prepare-only",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:all": "npm run build && electron-builder --win --mac",
     "test": "vitest run",
+    "test:win7": "npm run build && node --test scripts/win7-build.test.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {
