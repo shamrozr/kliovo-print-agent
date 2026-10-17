@@ -122,7 +122,8 @@ export async function verifyPackage(output, stage, arch) {
   }
   if (metadata.dependencies["better-sqlite3-multiple-ciphers"] !== SQLITE_VERSION) throw new Error("Unexpected packaged SQLite version");
   for (const entry of ["legacy-main.cjs", "legacy-runtime.cjs", "dist/main.js", "dist/updater.js", "dist/system-printer.js", "src/windows/settings/index.html", "src/windows/settings/renderer.js"]) {
-    if (!asar.extractFile(archive, entry).equals(await readFile(path.join(stage, entry)))) throw new Error(`Packaged file differs: ${entry}`);
+    // ASAR traverses nested archive paths using the host's path separator.
+    if (!asar.extractFile(archive, path.normalize(entry)).equals(await readFile(path.join(stage, entry)))) throw new Error(`Packaged file differs: ${entry}`);
   }
   const native = path.join("node_modules", "better-sqlite3-multiple-ciphers", "build", "Release", "better_sqlite3.node");
   const packagedNative = await readFile(path.join(resources, "app.asar.unpacked", native));
