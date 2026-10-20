@@ -12,7 +12,8 @@
  * here — per printer, FIFO — and retried on a backoff schedule for up to its
  * own hold window. Success takes the normal path (ledger → ACK). Expiry NACKs
  * with an aggregated reason, so the failed-print alert on the counter says how
- * long the agent tried. Zero server contact in between.
+ * long the agent tried. The delivery callback validates eligibility with the
+ * server before each attempt, so cached bytes cannot outlive the order.
  *
  * Invariants:
  *  - Only RetryableSendError (failed BEFORE connect) is retried. A failure after
@@ -58,6 +59,8 @@ export interface HoldDeps<C = unknown> {
   onPrinted(job: HeldJob<C>): void;
   /** Window expired or a non-retryable error — caller NACKs with `reason`. */
   onGiveUp(job: HeldJob<C>, reason: string): void;
+  /** Server revoked a buffered ticket: release it without NACKing a settled row. */
+  onDiscard?(job: HeldJob<C>, reason: string): void;
   isRetryable(err: unknown): boolean;
   log(msg: string): void;
 }
@@ -69,6 +72,7 @@ const FLUSH_GAP_MS = 300;
 /** Ceiling — the server's stuck-printing sweeper is 20 minutes. */
 export const MAX_HOLD_MS = 5 * 60 * 1000;
 export const DEFAULT_HOLD_MS = 60 * 1000;
+export class DiscardHeldPrint extends Error {}
 /** Bounded so a dead printer during a long outage cannot grow memory without limit. */
 const MAX_QUEUE_PER_PRINTER = 200;
 
@@ -183,6 +187,13 @@ export class PrintHold<C = unknown> {
         await this.deps.deliver(head);
       } catch (e) {
         const err = e instanceof Error ? e : new Error(String(e));
+        if (err instanceof DiscardHeldPrint) {
+          this.release(head, s);
+          this.deps.log(`[hold] discarded ${head.printJobId}: ${err.message}`);
+          this.deps.onDiscard?.(head, err.message);
+          if (s.queue.length > 0) this.schedule(printerId, s, FLUSH_GAP_MS);
+          return;
+        }
         head.lastError = err.message;
         if (!this.deps.isRetryable(err)) {
           // Connected, then failed: bytes may already be on the wire. Never retry.

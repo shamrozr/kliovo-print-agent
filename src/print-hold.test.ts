@@ -182,3 +182,16 @@ describe("PrintHold", () => {
     expect(deliver.mock.calls.length).toBeLessThan(300_000 / 1_000); // never a hot loop
   });
 });
+
+describe("server revocation of held tickets", () => {
+  it("drops revoked bytes without reporting a delivery failure or printing", async () => {
+    const { DiscardHeldPrint } = await import("./print-hold");
+    const { hold, t, gaveUp, printed, deliver } = makeHold({ deliverImpl: async () => { throw new DiscardHeldPrint("order served"); } });
+    hold.enqueue({ printerId: "p1", printJobId: "old", bytes, holdMs: 60_000, error: "timeout", ctx: {} });
+    await t.advance(HOLD_BACKOFF_MS[0]);
+    expect(hold.isHeld("old")).toBe(false);
+    expect(gaveUp).toEqual([]);
+    expect(printed).toEqual([]);
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+});

@@ -25,6 +25,10 @@ let ready = false;
 export function initPrintLedger(): void {
   try {
     getStore().prepare("SELECT 1 FROM printed_jobs LIMIT 1").get();
+    getStore().exec(`CREATE TABLE IF NOT EXISTS pending_print_sends (
+      print_job_id TEXT PRIMARY KEY, printer_id TEXT NOT NULL, agent_key TEXT NOT NULL,
+      attempted_at INTEGER NOT NULL, error TEXT NOT NULL
+    )`);
     ready = true;
     logger.info("[ledger] print dedup ledger ready");
   } catch (e) {
@@ -69,9 +73,45 @@ export function markPrinted(printJobId: string, printerId: string, agentKey: str
          ON CONFLICT(print_job_id) DO NOTHING`
       )
       .run(printJobId, printerId, agentKey, Date.now());
+    clearSendAttempt(printJobId);
   } catch (e) {
     logger.error(`[ledger] markPrinted failed for ${printJobId}: ${(e as Error).message}`);
   }
+}
+
+/** Write intent BEFORE touching the socket. A restart mid-send is uncertain,
+ * never permission to replay bytes. Only a proven pre-connect error clears it. */
+export function beginSendAttempt(printJobId: string, printerId: string, agentKey: string): boolean {
+  if (!ready) return false;
+  try {
+    getStore().prepare(`INSERT INTO pending_print_sends (print_job_id, printer_id, agent_key, attempted_at, error)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(print_job_id) DO NOTHING`)
+      .run(printJobId, printerId, agentKey, Date.now(), "Delivery interrupted — check the kitchen for a ticket before reprinting");
+    return true;
+  } catch (e) {
+    logger.error(`[ledger] send intent failed for ${printJobId}: ${(e as Error).message}`);
+    return false;
+  }
+}
+
+export function clearSendAttempt(printJobId: string): void {
+  if (!ready) return;
+  try { getStore().prepare("DELETE FROM pending_print_sends WHERE print_job_id = ?").run(printJobId); }
+  catch (e) { logger.error(`[ledger] clearing send intent failed: ${(e as Error).message}`); }
+}
+
+export function pendingUncertainSends(limit = 25): (PendingAck & { error: string })[] {
+  if (!ready) return [];
+  try {
+    return getStore().prepare(`SELECT print_job_id AS printJobId, printer_id AS printerId, agent_key AS agentKey, error
+      FROM pending_print_sends ORDER BY attempted_at LIMIT ?`).all(limit) as (PendingAck & { error: string })[];
+  } catch { return []; }
+}
+
+export function uncertainSend(printJobId: string): boolean {
+  if (!ready) return false;
+  try { return !!getStore().prepare("SELECT 1 FROM pending_print_sends WHERE print_job_id = ?").get(printJobId); }
+  catch { return true; }
 }
 
 export function markAcked(printJobId: string): void {

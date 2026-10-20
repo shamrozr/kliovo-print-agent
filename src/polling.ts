@@ -3,11 +3,13 @@ import { loadConfig, PrinterEntry } from "./config";
 import { drawerHeaders, drawerFingerprint, withDrawerKick } from "./print/drawer";
 import { deliverToPrinter } from "./deliver";
 import { sendRawToPrinter, RetryableSendError } from "./tcp-sender";
-import { PrintHold, DEFAULT_HOLD_MS, MAX_HOLD_MS, type HeldJob } from "./print-hold";
+import { PrintHold, DEFAULT_HOLD_MS, MAX_HOLD_MS, DiscardHeldPrint, type HeldJob } from "./print-hold";
+import { authorizeHeldDelivery } from "./held-validation";
 import { recordResult } from "./health";
 import { logger } from "./logger";
 import {
   hasPrinted,
+  beginSendAttempt, clearSendAttempt, pendingUncertainSends, uncertainSend,
   isLedgerReady,
   markAcked,
   markPrinted,
@@ -96,14 +98,40 @@ interface HoldCtx {
   printer: PrinterEntry;
 }
 
+const activeSends = new Set<string>();
+
+async function sendQueuedNetwork(printer: PrinterEntry, jobId: string, bytes: Buffer): Promise<void> {
+  if (!beginSendAttempt(jobId, printer.printerId, printer.agentKey)) {
+    throw new RetryableSendError("Print ledger unavailable; delivery paused");
+  }
+  activeSends.add(jobId);
+  try {
+    await sendRawToPrinter(printer.host, printer.port || 9100, bytes);
+  } catch (error) {
+    if (error instanceof RetryableSendError) clearSendAttempt(jobId);
+    // Otherwise retain intent until NACK is accepted, including across restart.
+    throw error;
+  } finally {
+    activeSends.delete(jobId);
+  }
+}
+
 const hold = new PrintHold<HoldCtx>({
   now: () => Date.now(),
   setTimer: (fn, ms) => setTimeout(fn, ms),
   clearTimer: (h) => clearTimeout(h as NodeJS.Timeout),
   // ONE attempt per tick — the hold's own backoff paces it. Network printers
-  // only: a spooler failure is not a network blip, and deliverToPrinter's
-  // quick triple already ran before the job got here.
-  deliver: (job) => sendRawToPrinter(job.ctx.printer.host, job.ctx.printer.port || 9100, job.bytes),
+  // only: a spooler failure is not a network blip. The first failed connect
+  // reports the incident before this backoff starts.
+  deliver: async (job) => {
+    // Recovery needs a working ledger and a fresh decision. No cached replay
+    // while cloud access is down, after dismissal, or after an order closes.
+    if (!isLedgerReady()) throw new RetryableSendError("Print ledger unavailable; recovery paused");
+    if (hasPrinted(job.printJobId)) throw new DiscardHeldPrint("Ticket already recorded as printed");
+    await authorizeHeldDelivery(job.ctx.serverUrl, job.printJobId, job.ctx.printer.agentKey);
+    if (Date.now() - job.enqueuedAt >= job.holdMs) throw new DiscardHeldPrint("Ticket retry window expired");
+    await sendQueuedNetwork(job.ctx.printer, job.printJobId, job.bytes);
+  },
   onPrinted: (job) => {
     lastPrintAt = Date.now();
     markPrinted(job.printJobId, job.ctx.printer.printerId, job.ctx.printer.agentKey);
@@ -223,6 +251,7 @@ async function nackJob(
       return;
     }
     // Never log agentKey — it is a bearer secret that would leak into agent.log.
+    clearSendAttempt(printJobId);
     logger.warn(`[poll] nacked job ${printJobId}`);
   } catch (e) {
     logger.warn(`[poll] nack ${printJobId} failed: ${(e as Error).message}`);
@@ -321,6 +350,7 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
   // bounded reclaim re-serves an un-ACKed job after its grace). Printing this
   // copy too would double the ticket the moment the printer answers.
   if (hold.isHeld(printJobId)) {
+    reportHeld(serverUrl, printJobId, printer.agentKey, "printer still unreachable (held locally)", resolveHoldMs(printer.printerId, loadConfig().printHoldMs));
     logger.info(`[poll] job ${printJobId} is held locally — redelivery ignored`);
     return;
   }
@@ -332,6 +362,11 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
   if (hasPrinted(printJobId)) {
     logger.info(`[poll] job ${printJobId} already printed — re-acking, not reprinting`);
     await ackJob(serverUrl, printJobId, printer.agentKey);
+    return;
+  }
+
+  if (uncertainSend(printJobId)) {
+    await nackJob(serverUrl, printJobId, printer.agentKey, "Delivery interrupted — check the kitchen for a ticket before reprinting");
     return;
   }
 
@@ -364,7 +399,13 @@ async function pollPrinter(serverUrl: string, printer: PrinterEntry): Promise<vo
 
   lastPrintAt = Date.now();
   try {
-    await deliverToPrinter(printer, bytes);
+    if (printer.connection !== "system") {
+      // First failed connect enters hold and reports immediately (~2s),
+      // instead of hiding the outage behind three quick attempts (~7s).
+      await sendQueuedNetwork(printer, printJobId, bytes);
+    } else {
+      await deliverToPrinter(printer, bytes);
+    }
   } catch (e) {
     const msg = (e as Error).message;
     // A PRE-CONNECT failure on a network printer is a blip until proven
@@ -436,6 +477,11 @@ export function startPolling(): NodeJS.Timeout {
     const printers = usablePrinters(config.printers);
     if (printers.length === 0) return;
 
+    for (const pending of pendingUncertainSends()) {
+      if (activeSends.has(pending.printJobId)) continue;
+      if (hasPrinted(pending.printJobId)) { clearSendAttempt(pending.printJobId); continue; }
+      void nackJob(config.serverUrl, pending.printJobId, pending.agentKey, pending.error);
+    }
     flushPendingAcks(config.serverUrl).catch((e) => {
       logger.warn(`[poll] flushPendingAcks error: ${(e as Error).message}`);
     });
